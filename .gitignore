@@ -1,0 +1,23 @@
+# secrets
+.env
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# data
+backend/data/qdrant/
+
+# node
+node_modules/
+dist/
+
+# os / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+~$*
