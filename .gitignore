@@ -14,6 +14,7 @@ backend/data/qdrant/
 # node
 node_modules/
 dist/
+*.tsbuildinfo
 
 # os / editors
 .DS_Store
