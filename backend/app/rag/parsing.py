@@ -62,7 +62,7 @@ def _assign_sections(blocks: list[Block]) -> list[Block]:
 
 # ---------------------------------------------------------------- PDF
 def parse_pdf(path: Path) -> list[Block]:
-    import fitz  # PyMuPDF
+    import pymupdf as fitz
 
     blocks: list[Block] = []
     with fitz.open(path) as doc:
