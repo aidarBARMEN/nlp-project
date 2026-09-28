@@ -33,8 +33,8 @@ backend = ["data/abbreviations.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: explicit network/API tests"]
-addopts = "-m 'not integration'"
+markers = ["integration: explicit network/API tests", "browser: Chromium UI regression tests against a running frontend"]
+addopts = "-m 'not integration and not browser'"
 
 [tool.ruff]
 line-length = 100

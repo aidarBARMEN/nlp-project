@@ -189,6 +189,18 @@ def test_tokenizer_accepts_literal_special_tokens(application):
     assert response.json()["token_count"] > 0
 
 
+def test_chat_explains_unconfirmed_documents_without_calling_llm(application, pdf_factory):
+    api, _, sdk = application
+    upload(api, pdf_factory())
+    response = api.post("/api/chat", json={"question": "Какие правила?"})
+    assert response.status_code == 200
+    assert "Подтвердить" in response.json()["answer"]
+    assert response.json()["sources"] == []
+    stream = api.post("/api/chat/stream", json={"question": "Какие правила?"})
+    assert "Подтвердить" in stream.text and "event: done" in stream.text
+    sdk.chat.completions.create.assert_not_called()
+
+
 def test_sync_retries_ocr_from_retained_raw_without_api_key(application, monkeypatch):
     import json
 

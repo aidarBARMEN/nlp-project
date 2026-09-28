@@ -102,5 +102,16 @@ npm.cmd --prefix frontend run build
 Для отдельной проверки реального embeddings API с настроенным ключом:
 `python scripts/smoke_ingestion.py`.
 
+Браузерные проверки запускаются отдельно при работающем сервере с собранным frontend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install playwright
+.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe -m pytest tests/browser -m browser -q
+```
+
+Они проверяют подтверждение и отправку вопроса во встроенном просмотре. API подменён:
+реальные документы и их статусы не изменяются. Для другого адреса задайте `KBTU_UI_TEST_URL`.
+
 Подробнее: [ingestion](docs/INGESTION.md), [интеграция](docs/INTEGRATION.md),
 [проверки](docs/VALIDATION.md).

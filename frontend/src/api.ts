@@ -153,12 +153,18 @@ export async function streamChat(
     return
   }
   if (!res.ok || !res.body) {
-    h.onError(`Ошибка сервера: ${res.status}`)
+    let detail = `Ошибка сервера: ${res.status}`
+    try {
+      const body = await res.json()
+      if (typeof body.detail === 'string') detail = body.detail
+    } catch { /* Keep the HTTP status when there is no JSON body. */ }
+    h.onError(detail)
     return
   }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let completed = false
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -177,11 +183,19 @@ export async function streamChat(
         const payload = data ? JSON.parse(data) : null
         if (event === 'sources') h.onSources(payload)
         else if (event === 'token') h.onToken(payload)
-        else if (event === 'done') h.onDone(payload ?? {})
-        else if (event === 'error') h.onError(payload?.detail ?? 'Неизвестная ошибка')
+        else if (event === 'done') {
+          completed = true
+          h.onDone(payload ?? {})
+        } else if (event === 'error') {
+          completed = true
+          h.onError(payload?.detail ?? 'Неизвестная ошибка')
+        }
       }
     }
+    if (!completed && !signal?.aborted) h.onError('Соединение прервалось до завершения ответа. Повторите вопрос.')
   } catch (e) {
     if ((e as Error).name !== 'AbortError') h.onError(String(e))
+  } finally {
+    reader.releaseLock()
   }
 }

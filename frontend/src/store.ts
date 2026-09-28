@@ -10,6 +10,12 @@ export interface Conversation {
 
 const KEY = 'kbtu-assistant:conversations'
 
+// randomUUID requires a secure context; HTTP and embedded previews may lack it.
+function conversationId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 function load(): Conversation[] {
   try {
     return JSON.parse(localStorage.getItem(KEY) || '[]')
@@ -19,7 +25,7 @@ function load(): Conversation[] {
 }
 
 export const newConversation = (): Conversation => ({
-  id: crypto.randomUUID(),
+  id: conversationId(),
   title: 'Новый чат',
   messages: [],
   updatedAt: Date.now(),

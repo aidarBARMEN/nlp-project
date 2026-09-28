@@ -66,13 +66,12 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
     })
 
   const verify = (d: DocumentInfo) =>
-    confirm(`Вы проверили, что «${d.title}» — официальный документ КБТУ? После индексации он сможет использоваться в ответах.`) &&
-    run('trust', async () => {
+    run(`trust:${d.doc_id}`, async () => {
       await api.setTrust(d.doc_id, 'official', 'Оператор подтвердил официальный источник в интерфейсе')
       return [{ ok: true, text: `Подтверждён источник: ${d.title}` }]
     })
 
-  const revoke = (d: DocumentInfo) => run('trust', async () => {
+  const revoke = (d: DocumentInfo) => run(`trust:${d.doc_id}`, async () => {
     await api.setTrust(d.doc_id, 'unverified', 'Оператор отправил источник на повторную проверку')
     return [{ ok: true, text: `Документ отправлен на проверку: ${d.title}` }]
   })
@@ -170,8 +169,9 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
         )}
 
         <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-700">
-            Документы и состояние обработки
+          <div className="border-b border-slate-100 px-5 py-3">
+            <div className="text-sm font-semibold text-slate-700">Документы и состояние обработки</div>
+            <p className="mt-1 text-xs text-slate-500">Нажимая «Подтвердить», вы отмечаете документ как проверенный официальный источник КБТУ.</p>
           </div>
           {loading ? (
             <div className="flex justify-center py-10">
@@ -218,11 +218,14 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                       <td className="px-3 py-3">
                         <div className="flex justify-end gap-1">
                           <button
+                            type="button"
                             onClick={() => d.trust_level === 'official' ? revoke(d) : verify(d)}
                             disabled={!!busy}
-                            className="rounded-lg px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                            aria-busy={busy === `trust:${d.doc_id}`}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
                           >
-                            {d.trust_level === 'official' ? 'На проверку' : 'Подтвердить'}
+                            {busy === `trust:${d.doc_id}` && <Loader2 size={12} className="animate-spin" />}
+                            {busy === `trust:${d.doc_id}` ? 'Сохраняю…' : d.trust_level === 'official' ? 'На проверку' : 'Подтвердить'}
                           </button>
                           <a
                             href={api.fileUrl(d.doc_id)}

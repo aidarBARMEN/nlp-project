@@ -73,19 +73,24 @@ export default function ChatPage({ convs, health }: { convs: Convs; health: Heal
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    await streamChat(
-      question,
-      history,
-      {
-        onSources: ({ query, sources }) => patchLast((m) => ({ ...m, sources, query })),
-        onToken: (t) => patchLast((m) => ({ ...m, content: m.content + t })),
-        onDone: (meta) => patchLast((m) => ({ ...m, meta })),
-        onError: (detail) => patchLast((m) => ({ ...m, error: detail })),
-      },
-      ctrl.signal,
-    )
-    setBusy(false)
-    abortRef.current = null
+    try {
+      await streamChat(
+        question,
+        history,
+        {
+          onSources: ({ query, sources }) => patchLast((m) => ({ ...m, sources, query })),
+          onToken: (t) => patchLast((m) => ({ ...m, content: m.content + t })),
+          onDone: (meta) => patchLast((m) => ({ ...m, meta })),
+          onError: (detail) => patchLast((m) => ({ ...m, error: detail })),
+        },
+        ctrl.signal,
+      )
+    } catch {
+      patchLast((m) => ({ ...m, error: 'Не удалось получить ответ. Попробуйте отправить вопрос ещё раз.' }))
+    } finally {
+      setBusy(false)
+      abortRef.current = null
+    }
   }
 
   const empty = messages.length === 0
@@ -137,7 +142,9 @@ export default function ChatPage({ convs, health }: { convs: Convs; health: Heal
             </button>
           ) : (
             <button
-              type="submit"
+              type="button"
+              aria-label="Отправить"
+              onClick={() => send(input)}
               disabled={!input.trim()}
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-md shadow-brand-600/30 transition hover:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
             >
@@ -175,7 +182,7 @@ function EmptyState({ onPick, health }: { onPick: (q: string) => void; health: H
         </Notice>
       )}
       {health && health.openai_key && health.chunks === 0 && (
-        <Notice>Подготовьте и подтвердите официальные документы на вкладке «База знаний».</Notice>
+        <Notice>Для ответа нужен хотя бы один подтверждённый документ. Во вкладке «База знаний» нажмите «Подтвердить» рядом с официальным источником. Если он ожидает индексации, нажмите «Обновить базу».</Notice>
       )}
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

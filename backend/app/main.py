@@ -199,6 +199,24 @@ def _sse(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def knowledge_not_ready_message() -> str:
+    docs = registry_documents()
+    if any(d["status"] == "processed" and d["trust_level"] == "unverified" for d in docs):
+        return (
+            "Документы загружены, но пока не подтверждены. Во вкладке «База знаний» "
+            "нажмите «Подтвердить» рядом с официальным документом КБТУ, затем повторите вопрос."
+        )
+    if any(d["status"] == "pending" for d in docs):
+        return (
+            "Документы подготовлены, но ещё не проиндексированы. "
+            "Нажмите «Обновить базу» во вкладке «База знаний», затем повторите вопрос."
+        )
+    return (
+        "Нет действующих проиндексированных официальных документов. "
+        "Подготовьте и подтвердите источники во вкладке «База знаний»."
+    )
+
+
 @app.post("/api/chat/stream")
 def chat_stream(req: ChatRequest):
     history = [m.model_dump() for m in req.history]
@@ -217,7 +235,7 @@ def chat_stream(req: ChatRequest):
             if not kb.chunks:
                 yield _sse(
                     "token",
-                    "Нет проиндексированных официальных документов. Подготовьте и подтвердите источники во вкладке «База знаний».",
+                    knowledge_not_ready_message(),
                 )
                 yield _sse("done", {})
                 return
@@ -264,7 +282,7 @@ def chat(req: ChatRequest):
     kb.reload()
     history = [m.model_dump() for m in req.history]
     if not kb.chunks:
-        return {"answer": "Нет проиндексированных официальных документов.", "sources": []}
+        return {"answer": knowledge_not_ready_message(), "sources": []}
     query = rewrite_with_history(req.question, history) if settings.query_rewrite else req.question
     found = hybrid_search(query)
     return {
