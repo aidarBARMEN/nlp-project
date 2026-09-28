@@ -1,0 +1,55 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Unbounded', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-navy-950: #060d24;
+  --color-navy-900: #0b1739;
+  --color-navy-800: #12224f;
+  --color-navy-700: #1b3068;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe7ff;
+  --color-brand-200: #bfd3ff;
+  --color-brand-400: #6d97ff;
+  --color-brand-500: #3f6ffb;
+  --color-brand-600: #2a55e6;
+  --color-brand-700: #2143bd;
+
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-blink: blink 1s steps(2, start) infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes blink {
+    to { visibility: hidden; }
+  }
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+}
+
+.bg-mesh {
+  background:
+    radial-gradient(900px 500px at 10% -10%, rgb(63 111 251 / 0.10), transparent 60%),
+    radial-gradient(700px 400px at 110% 10%, rgb(251 191 36 / 0.08), transparent 60%),
+    #f8fafc;
+}
+
+.scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(148 163 184 / 0.4); border-radius: 999px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+
+.cursor-caret::after {
+  content: '▍';
+  @apply ml-0.5 text-brand-500 animate-blink;
+}
