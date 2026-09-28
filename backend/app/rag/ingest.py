@@ -105,7 +105,19 @@ def sync_directory(reset: bool = False) -> dict:
     with ingestion_session() as pipeline:
         for doc in pipeline.registry.all():
             row = pipeline.registry.row(doc.doc_id)
-            if doc.metadata.get("archived_at") or row["status"] == "needs_ocr":
+            if doc.metadata.get("archived_at"):
+                continue
+            if row["status"] == "needs_ocr":
+                if settings.ocr_enabled:
+                    try:
+                        report["indexed"].append(_result(pipeline, pipeline.retry_ocr(doc.doc_id)))
+                    except Exception as exc:
+                        report["errors"].append(
+                            {
+                                "file_name": doc.original_filename or doc.title,
+                                "error": safe_error(exc),
+                            }
+                        )
                 continue
             if settings.has_openai_key and (reset or row["status"] != "processed"):
                 try:

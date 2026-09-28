@@ -187,3 +187,50 @@ def test_tokenizer_accepts_literal_special_tokens(application):
     response = api.post("/api/nlp/tokenize", json={"text": "Policy <|endoftext|> rules"})
     assert response.status_code == 200
     assert response.json()["token_count"] > 0
+
+
+def test_sync_retries_ocr_from_retained_raw_without_api_key(application, monkeypatch):
+    import json
+
+    import pymupdf
+
+    from ingestion.services.normalizer import content_hash
+
+    api, config, sdk = application
+    config.openai_api_key = None
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        pixmap = pymupdf.Pixmap(pymupdf.csRGB, (0, 0, 40, 40), 0)
+        pixmap.clear_with(255)
+        page.insert_image(page.rect, pixmap=pixmap)
+        data = pdf.tobytes()
+    uploaded = api.post("/api/documents/upload", files={"files": ("scan.pdf", data)})
+    assert uploaded.json()["errors"]
+    doc = api.get("/api/documents").json()[0]
+    assert doc["status"] == "needs_ocr"
+    trust(api, doc["doc_id"])
+    # Recovery must work from immutable raw, even if the inbox copy is gone.
+    for path in config.documents_path.rglob("scan.pdf"):
+        path.unlink()
+
+    def recognize(page, **kwargs):
+        page.insert_text((72, 90), "Students register for exams in the university portal.")
+        return page.get_textpage()
+
+    monkeypatch.setattr(pymupdf.Page, "get_textpage_ocr", recognize)
+    monkeypatch.setattr("ingestion.parsers.pdf_parser.ocr_data_directory", lambda *_: "test-data")
+    config.ocr_enabled = True
+    report = api.post("/api/documents/sync").json()
+    assert report["errors"] == [], report
+    assert report["indexed"][0]["status"] == "pending"
+    recovered = api.get("/api/documents").json()[0]
+    assert recovered["doc_id"] == doc["doc_id"]
+    assert recovered["trust_level"] == "official"
+    assert recovered["chunks"] > 0
+    with ingest.ingestion_session() as pipeline:
+        canonical = pipeline.registry.get(doc["doc_id"])
+        artifact = json.loads(pipeline.parsed_path(doc["doc_id"]).read_text(encoding="utf-8"))
+        assert canonical.content_hash == content_hash(
+            "\n".join(block["text"] for block in artifact["parsed"]["blocks"])
+        )
+    sdk.embeddings.create.assert_not_called()

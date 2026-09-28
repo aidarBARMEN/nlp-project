@@ -1,21 +1,55 @@
 import os
 import statistics
+from pathlib import Path
 
 import pymupdf
 
 # Keep CLI stdout machine-readable on versions that print a layout recommendation.
 os.environ.setdefault("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "0")
 
+from ingestion.config import PROJECT_DIR
 from ingestion.models import Block, Page, ParsedDocument
 from ingestion.services.normalizer import normalize
 
 
+def ocr_data_directory(languages: str, directory: Path | None = None) -> str:
+    if directory is None:
+        local = PROJECT_DIR / "data" / "tessdata"
+        directory = (
+            Path(os.environ["TESSDATA_PREFIX"]) if os.environ.get("TESSDATA_PREFIX") else local
+        )
+        if not directory.is_dir():
+            try:
+                directory = Path(pymupdf.get_tessdata())
+            except RuntimeError:
+                raise ValueError(
+                    "OCR не настроен. Выполните: python scripts/setup_ocr.py --enable"
+                ) from None
+    missing = [
+        lang for lang in languages.split("+") if not (directory / f"{lang}.traineddata").is_file()
+    ]
+    if missing:
+        raise ValueError(
+            "Не найдены языки OCR: "
+            + ", ".join(missing)
+            + ". Выполните: python scripts/setup_ocr.py --enable"
+        )
+    return str(directory)
+
+
 def parse_pdf(
-    data: bytes, fallback_title: str, source: str, *, ocr=False, languages="rus+kaz+eng"
+    data: bytes,
+    fallback_title: str,
+    source: str,
+    *,
+    ocr=False,
+    languages="rus+kaz+eng",
+    tessdata: Path | None = None,
 ) -> ParsedDocument:
     blocks = []
     pages = []
     missing = []
+    recognized = []
     section = None
     with pymupdf.open(stream=data, filetype="pdf") as document:
         if document.needs_pass:
@@ -26,8 +60,17 @@ def parse_pdf(
             textpage = None
             if len(text.strip()) < 20 and page.get_images():
                 if ocr:
-                    textpage = page.get_textpage_ocr(language=languages, dpi=200, full=True)
+                    directory = ocr_data_directory(languages, tessdata)
+                    try:
+                        textpage = page.get_textpage_ocr(
+                            language=languages, dpi=300, full=True, tessdata=directory
+                        )
+                    except RuntimeError:
+                        raise ValueError(
+                            "Не удалось распознать PDF. Проверьте языки OCR и качество скана."
+                        ) from None
                     text = page.get_text(textpage=textpage, sort=True)
+                    recognized.append(page.number + 1)
                 if len(text.strip()) < 20:
                     missing.append(page.number + 1)
             pages.append(
@@ -94,5 +137,5 @@ def parse_pdf(
         blocks=blocks,
         pages=pages,
         needs_ocr=needs_ocr,
-        metadata={"ocr_pages": missing},
+        metadata={"ocr_pages": missing, "ocr_completed_pages": recognized},
     )

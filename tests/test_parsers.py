@@ -75,3 +75,52 @@ def test_joomla_sections_and_standalone_document_links():
     assert "Academic rules" in parsed.blocks[1].text
     assert "https://kbtu.edu.kz/files/rules.pdf" in parsed.blocks[1].text
     assert all("spoiler" not in block.text for block in parsed.blocks)
+
+
+def test_ocr_recognizes_scan_and_keeps_page_numbers(monkeypatch):
+    calls = []
+
+    def recognize(page, **kwargs):
+        calls.append((page.number, kwargs))
+        page.insert_text((72, 90), "Recognized official university registration rules.")
+        return page.get_textpage()
+
+    monkeypatch.setattr(pymupdf.Page, "get_textpage_ocr", recognize)
+    monkeypatch.setattr(
+        "ingestion.parsers.pdf_parser.ocr_data_directory", lambda *_: "test-tessdata"
+    )
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text((72, 90), "This page already contains native PDF text.")
+        scanned = doc.new_page()
+        pixmap = pymupdf.Pixmap(pymupdf.csRGB, (0, 0, 40, 40), 0)
+        pixmap.clear_with(255)
+        scanned.insert_image(scanned.rect, pixmap=pixmap)
+        parsed = parse(doc.tobytes(), PDF, "scan.pdf", "scan", ocr=True)
+    assert not parsed.needs_ocr
+    assert [call[0] for call in calls] == [1]
+    assert calls[0][1]["tessdata"] == "test-tessdata"
+    assert calls[0][1]["language"] == "rus+kaz+eng"
+    assert parsed.metadata["ocr_completed_pages"] == [2]
+    assert parsed.metadata["ocr_pages"] == []
+    assert "Recognized" in parsed.pages[1].text
+    assert any(b.page_number == 2 and "Recognized" in b.text for b in parsed.blocks)
+
+
+def test_missing_ocr_languages_have_actionable_error(tmp_path):
+    from ingestion.parsers.pdf_parser import ocr_data_directory
+
+    with pytest.raises(ValueError, match="setup_ocr.py"):
+        ocr_data_directory("rus+kaz+eng", tmp_path)
+
+
+def test_native_pdf_needs_no_ocr_installation(pdf_factory, tmp_path):
+    parsed = parse(
+        pdf_factory(),
+        PDF,
+        "policy.pdf",
+        "policy",
+        ocr=True,
+        ocr_tessdata=tmp_path / "not-installed",
+    )
+    assert not parsed.needs_ocr
+    assert parsed.metadata["ocr_completed_pages"] == []

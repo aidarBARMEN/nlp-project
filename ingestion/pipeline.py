@@ -186,6 +186,7 @@ class Pipeline:
                         source,
                         ocr=self.settings.ocr_enabled,
                         ocr_languages=self.settings.ocr_languages,
+                        ocr_tessdata=self.settings.ocr_tessdata,
                     )
                     event("DOCUMENT_PARSED", attempt_id=attempt_id, pages_count=len(parsed.pages))
                     doc = extract(
@@ -224,6 +225,15 @@ class Pipeline:
                                 parsed = ParsedDocument.model_validate(
                                     self._artifact(duplicate.doc_id)["parsed"]
                                 )
+                            else:
+                                # OCR changes extracted text without changing the original bytes.
+                                duplicate.content_hash = doc.content_hash
+                                if self.registry.row(duplicate.doc_id)["status"] == "needs_ocr":
+                                    duplicate.language = doc.language
+                                    duplicate.category = duplicate.category or doc.category
+                                    duplicate.metadata["languages"] = doc.metadata.get(
+                                        "languages", []
+                                    )
                             doc = duplicate
                         if not parsed.blocks and not parsed.needs_ocr:
                             raise ValueError("No useful document content found")
@@ -261,7 +271,10 @@ class Pipeline:
                             else "pending"
                             if self.parse_only
                             else "processed",
-                            error="PDF needs OCR; enable OCR_ENABLED and Tesseract language packs"
+                            error=(
+                                "PDF содержит скан без читаемого текста. Настройте OCR: "
+                                "python scripts/setup_ocr.py --enable, затем обновите базу."
+                            )
                             if parsed.needs_ocr
                             else None,
                             pages_count=len(parsed.pages),
@@ -360,6 +373,22 @@ class Pipeline:
                 status="processed",
                 chunks_count=len(chunks),
                 pages_count=len(parsed.pages),
+            )
+
+    def retry_ocr(self, doc_id: str) -> IngestResult:
+        """Recognize a retained original without needing another upload or crawl."""
+        if not self.settings.ocr_enabled:
+            raise ValueError("Сначала включите OCR: python scripts/setup_ocr.py --enable")
+        with self.lock:
+            doc = self.registry.get(doc_id)
+            if doc.metadata.get("archived_at"):
+                raise ValueError("Документ находится в архиве")
+            return self.ingest_bytes(
+                Path(doc.raw_path).read_bytes(),
+                filename=doc.original_filename or Path(doc.raw_path).name,
+                source=doc.source_url or doc.raw_path,
+                channel=doc.source_channel,
+                source_url=doc.source_url,
             )
 
     def set_trust(self, doc_id: str, trust: Trust, reason: str):

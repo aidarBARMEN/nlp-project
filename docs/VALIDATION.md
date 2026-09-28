@@ -4,7 +4,7 @@
 
 | Проверка | Результат |
 |---|---|
-| `python -m pytest -q` | 71 тест прошёл |
+| `python -m pytest -q` | 75 тестов прошли |
 | `python -m ruff check .` | Без ошибок |
 | `python -m mypy` | Без ошибок, 24 файла ingestion |
 | `python -m pip check` | Конфликтов зависимостей нет |
@@ -12,7 +12,7 @@
 | Реальные страницы → raw → parsing → chunks | 5 документов, 39 chunks |
 | PDF/DOCX → Qdrant в тестах | Настоящий embedded Qdrant; тестовый embedder |
 | OpenAI адаптер → PDF → Qdrant | Подменённый SDK-клиент, без внешних API-запросов |
-| Полный smoke с OpenAI API | Не выполнен: OPENAI_API_KEY не задан |
+| Реальный PDF-скан → OCR → OpenAI API → Qdrant | 1 страница, 2238 символов после OCR, 6 chunks; HTTP-загрузка завершена без ошибок |
 | `npm --prefix frontend run build` | TypeScript + Vite успешно, 2144 модуля |
 | API → ingestion → persistent Qdrant → поиск → SSE | 7 тестов приложения, OpenAI подменён |
 | TXT/Markdown/CSV/XLSX → общий pipeline | 5 тестов форматов |
@@ -70,6 +70,11 @@ deduplication, версии и доверие, явные даты, смешан
 порядок и размерность векторов, ограничения длины и безопасные сообщения об ошибках.
 Эти проверки подменяют SDK-клиент и не оценивают качество реальных embeddings.
 
-OpenAI API, OCR с Tesseract и production-сервер Qdrant в этом окружении не проверялись.
-После настройки ключа можно запустить `python scripts/smoke_ingestion.py`;
-синтетический PDF хранится отдельно в `data/smoke-openai`.
+OCR проверен на реальном одностраничном скане с языками rus+kaz+eng и DPI 300;
+полученные chunks проиндексированы настоящим OpenAI API в embedded Qdrant.
+Дополнительные тесты проверяют номера страниц после OCR, отсутствие лишнего
+распознавания native-текста, понятную ошибку при отсутствии языков и повторную
+обработку из raw с сохранением doc_id, доверия и обновлением content_hash.
+Это проверка обработки, а не оценка точности распознавания всех PDF.
+Production-сервер Qdrant не проверялся. Для отдельного синтетического smoke
+предусмотрен `python scripts/smoke_ingestion.py` с данными в `data/smoke-openai`.

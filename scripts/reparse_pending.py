@@ -24,6 +24,7 @@ def main():
                 doc.source_url or doc.raw_path,
                 ocr=settings.ocr_enabled,
                 ocr_languages=settings.ocr_languages,
+                ocr_tessdata=settings.ocr_tessdata,
             )
             doc.content_hash = content_hash("\n".join(b.text for b in parsed.blocks))
             chunks = (

@@ -53,10 +53,24 @@ def detect_mime(data: bytes, filename: str = "") -> str:
 
 
 def parse(
-    data: bytes, mime: str, filename: str, source: str, *, ocr=False, ocr_languages="rus+kaz+eng"
+    data: bytes,
+    mime: str,
+    filename: str,
+    source: str,
+    *,
+    ocr=False,
+    ocr_languages="rus+kaz+eng",
+    ocr_tessdata: Path | None = None,
 ) -> ParsedDocument:
     if mime == PDF:
-        return parse_pdf(data, Path(filename).stem, source, ocr=ocr, languages=ocr_languages)
+        return parse_pdf(
+            data,
+            Path(filename).stem,
+            source,
+            ocr=ocr,
+            languages=ocr_languages,
+            tessdata=ocr_tessdata,
+        )
     if mime == DOCX:
         return parse_docx(data, Path(filename).stem)
     if mime == "text/html":

@@ -38,11 +38,14 @@ class Settings(BaseSettings):
     max_file_mb: int = Field(default=50, ge=1, le=250)
     ocr_enabled: bool = False
     ocr_languages: str = "rus+kaz+eng"
+    ocr_tessdata: Path | None = None
 
     @model_validator(mode="after")
     def validate_overlap(self):
         if not self.data_dir.is_absolute():
             self.data_dir = (PROJECT_DIR / self.data_dir).resolve()
+        if self.ocr_tessdata and not self.ocr_tessdata.is_absolute():
+            self.ocr_tessdata = (PROJECT_DIR / self.ocr_tessdata).resolve()
         if self.chunk_overlap >= self.chunk_tokens:
             raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_TOKENS")
         maximum = 1536 if self.embedding_model == "text-embedding-3-small" else 3072
