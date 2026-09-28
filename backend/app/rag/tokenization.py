@@ -21,7 +21,7 @@ def get_encoding(model: str | None = None) -> tiktoken.Encoding:
 
 
 def count_tokens(text: str, model: str | None = None) -> int:
-    return len(get_encoding(model).encode(text))
+    return len(get_encoding(model).encode(text, disallowed_special=()))
 
 
 # ---------------------------------------------------------------- лексическая токенизация (BM25)
@@ -48,7 +48,7 @@ STOPWORDS = {
     "the", "a", "an", "of", "to", "in", "on", "and", "or", "is", "are", "be", "for", "with", "as", "by", "at", "it",
     "this", "that", "from", "was", "were", "can", "i", "how", "what", "do", "does", "my",
     # kk
-    "және", "мен", "бен", "пен", "да", "де", "та", "те", "бұл", "осы", "үшін", "қалай", "не", "ма", "ме", "ба", "бе",
+    "және", "мен", "бен", "пен", "де", "та", "те", "бұл", "осы", "үшін", "қалай", "ма", "ме", "ба", "бе",
 }
 
 

@@ -1,28 +1,46 @@
 """KBTU Smart Assistant — FastAPI backend (RAG)."""
+
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
+
+from ingestion.config import PROJECT_DIR
+from ingestion.parsers import SUPPORTED_EXTENSIONS
 
 from .config import get_settings
 from .rag import generator
-from .rag.ingest import ingest_single, remove_document, sync_directory
+from .rag.ingest import (
+    get_document_file as document_file,
+)
+from .rag.ingest import (
+    ingest_single,
+    remove_document,
+    safe_error,
+    set_document_trust,
+    sync_directory,
+)
+from .rag.ingest import (
+    list_documents as registry_documents,
+)
 from .rag.knowledge_base import kb
-from .rag.llm import MissingAPIKey, cosine_matrix, embed_texts, is_flagged
-from .rag.parsing import SUPPORTED_EXTENSIONS
+from .rag.llm import MissingAPIKey, close_client, cosine_matrix, embed_texts, is_flagged
 from .rag.retriever import hybrid_search, rewrite_with_history
 from .rag.tokenization import get_encoding, lexical_tokens
-from .rag.vector_store import get_vector_store
-from .schemas import ChatRequest, EmbedRequest, SearchRequest, TokenizeRequest
+from .rag.vector_store import close_vector_store, get_vector_store
+from .schemas import ChatRequest, EmbedRequest, SearchRequest, TokenizeRequest, TrustRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
@@ -32,8 +50,11 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     settings.documents_path.mkdir(parents=True, exist_ok=True)
     kb.reload()
-    yield
-    get_vector_store().client.close()
+    try:
+        yield
+    finally:
+        close_vector_store()
+        close_client()
 
 
 app = FastAPI(title="KBTU Smart Assistant API", version="1.0.0", lifespan=lifespan)
@@ -52,12 +73,21 @@ async def _missing_key(_, exc: MissingAPIKey):
 
 @app.exception_handler(OpenAIError)
 async def _openai_error(_, exc: OpenAIError):
-    return JSONResponse(status_code=502, content={"detail": f"Ошибка OpenAI: {exc}"})
+    return JSONResponse(
+        status_code=502, content={"detail": "Ошибка OpenAI. Проверьте ключ, квоту и соединение."}
+    )
+
+
+@app.exception_handler(ValueError)
+async def _invalid_input(_, exc: ValueError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 # ---------------------------------------------------------------- system
 @app.get("/api/health")
 def health():
+    kb.reload()
+    docs = registry_documents()
     return {
         "status": "ok",
         "openai_key": settings.has_openai_key,
@@ -68,17 +98,20 @@ def health():
         "chunk_size": settings.chunk_size,
         "chunk_overlap": settings.chunk_overlap,
         **kb.stats(),
+        "documents": len(docs),
+        "pending_documents": sum(d["status"] == "pending" for d in docs),
+        "embedding_dimensions": settings.dense_dimensions,
     }
 
 
 # ---------------------------------------------------------------- documents
 @app.get("/api/documents")
 def list_documents():
-    return kb.documents()
+    return registry_documents()
 
 
 @app.post("/api/documents/upload")
-def upload_documents(files: list[UploadFile] = File(...)):
+def upload_documents(files: Annotated[list[UploadFile], File()]):
     root = settings.documents_path
     results, errors = [], []
     for f in files:
@@ -87,20 +120,25 @@ def upload_documents(files: list[UploadFile] = File(...)):
             errors.append({"file_name": name, "error": "Неподдерживаемый формат"})
             continue
         name = re.sub(r'[<>:"/\\|?*]', "_", name)
-        dest = root / name
-        dest.write_bytes(f.file.read())
+        data = f.file.read(settings.max_file_mb * 1024 * 1024 + 1)
+        if len(data) > settings.max_file_mb * 1024 * 1024:
+            errors.append({"file_name": name, "error": "Файл превышает MAX_FILE_MB"})
+            continue
+        dest = root / hashlib.sha256(data).hexdigest() / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
         try:
             results.append(ingest_single(dest))
         except MissingAPIKey:
             raise
         except Exception as e:  # noqa: BLE001
-            errors.append({"file_name": name, "error": str(e)})
+            errors.append({"file_name": name, "error": safe_error(e)})
     return {"indexed": results, "errors": errors}
 
 
 @app.post("/api/documents/sync")
 def sync_documents(reset: bool = False):
-    """Переиндексировать папку data/documents (новые, изменённые и удалённые файлы)."""
+    """Импорт inbox и индексация подготовленных документов без удаления исходников."""
     return sync_directory(reset=reset)
 
 
@@ -114,19 +152,46 @@ def delete_document(doc_id: str):
 
 @app.get("/api/documents/{doc_id}/file")
 def get_document_file(doc_id: str):
-    doc = next((d for d in kb.documents() if d["doc_id"] == doc_id), None)
-    if not doc:
-        raise HTTPException(404, "Документ не найден")
-    path = (settings.documents_path / doc["file_name"]).resolve()
-    if not path.is_relative_to(settings.documents_path) or not path.exists():
-        raise HTTPException(404, "Файл не найден на диске")
-    return FileResponse(path, filename=path.name, content_disposition_type="inline")
+    try:
+        path, filename, mime = document_file(doc_id)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(404, "Документ не найден") from None
+    return FileResponse(
+        path,
+        filename=filename,
+        media_type=mime,
+        content_disposition_type="inline" if mime == "application/pdf" else "attachment",
+    )
+
+
+@app.post("/api/documents/{doc_id}/trust")
+def document_trust(doc_id: str, request: TrustRequest):
+    try:
+        return set_document_trust(doc_id, request.trust_level, request.reason)
+    except KeyError:
+        raise HTTPException(404, "Документ не найден") from None
 
 
 # ---------------------------------------------------------------- RAG
 def _source(n: int, c: dict) -> dict:
-    keys = ("id", "doc_id", "title", "file_name", "section", "page_start", "page_end", "url", "text",
-            "dense_score", "dense_rank", "bm25_score", "bm25_rank", "rrf_score", "rerank_score", "token_count")
+    keys = (
+        "id",
+        "doc_id",
+        "title",
+        "file_name",
+        "section",
+        "page_start",
+        "page_end",
+        "url",
+        "text",
+        "dense_score",
+        "dense_rank",
+        "bm25_score",
+        "bm25_rank",
+        "rrf_score",
+        "rerank_score",
+        "token_count",
+    )
     return {"n": n, **{k: c.get(k) for k in keys}}
 
 
@@ -141,38 +206,65 @@ def chat_stream(req: ChatRequest):
     def events():
         t0 = time.perf_counter()
         try:
+            kb.reload()
             if settings.moderation and is_flagged(req.question):
-                yield _sse("token", "Запрос отклонён фильтром безопасности. Пожалуйста, переформулируйте вопрос.")
+                yield _sse(
+                    "token",
+                    "Запрос отклонён фильтром безопасности. Пожалуйста, переформулируйте вопрос.",
+                )
                 yield _sse("done", {})
                 return
             if not kb.chunks:
-                yield _sse("token", "База знаний пока пуста — загрузите документы во вкладке «База знаний».")
+                yield _sse(
+                    "token",
+                    "Нет проиндексированных официальных документов. Подготовьте и подтвердите источники во вкладке «База знаний».",
+                )
                 yield _sse("done", {})
                 return
 
-            query = rewrite_with_history(req.question, history) if settings.query_rewrite else req.question
+            query = (
+                rewrite_with_history(req.question, history)
+                if settings.query_rewrite
+                else req.question
+            )
             found = hybrid_search(query)
             t_retrieval = time.perf_counter() - t0
             sources = [_source(i, c) for i, c in enumerate(found["results"], start=1)]
-            yield _sse("sources", {"query": query, "expanded_query": found["expanded_query"], "sources": sources})
+            yield _sse(
+                "sources",
+                {"query": query, "expanded_query": found["expanded_query"], "sources": sources},
+            )
 
             for token in generator.stream_answer(req.question, found["results"], history):
                 yield _sse("token", token)
-            yield _sse("done", {"retrieval_ms": round(t_retrieval * 1000), "total_ms": round((time.perf_counter() - t0) * 1000)})
-        except (MissingAPIKey, OpenAIError) as e:
+            yield _sse(
+                "done",
+                {
+                    "retrieval_ms": round(t_retrieval * 1000),
+                    "total_ms": round((time.perf_counter() - t0) * 1000),
+                },
+            )
+        except (MissingAPIKey, ValueError) as e:
             yield _sse("error", {"detail": str(e)})
-        except Exception as e:  # noqa: BLE001
+        except OpenAIError:
+            yield _sse("error", {"detail": "Ошибка OpenAI. Проверьте ключ, квоту и соединение."})
+        except Exception:  # noqa: BLE001
             logging.exception("chat failed")
-            yield _sse("error", {"detail": f"Внутренняя ошибка: {e}"})
+            yield _sse(
+                "error", {"detail": "Внутренняя ошибка сервера. Подробности в журнале backend."}
+            )
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(
+        events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
+    kb.reload()
     history = [m.model_dump() for m in req.history]
     if not kb.chunks:
-        return {"answer": "База знаний пуста.", "sources": []}
+        return {"answer": "Нет проиндексированных официальных документов.", "sources": []}
     query = rewrite_with_history(req.question, history) if settings.query_rewrite else req.question
     found = hybrid_search(query)
     return {
@@ -198,13 +290,16 @@ def search(req: SearchRequest):
 def tokenize(req: TokenizeRequest):
     model = req.model or settings.openai_embedding_model
     enc = get_encoding(model)
-    ids = enc.encode(req.text)
+    ids = enc.encode(req.text, disallowed_special=())
     return {
         "encoding": enc.name,
         "model": model,
         "token_count": len(ids),
         "char_count": len(req.text),
-        "tokens": [{"id": i, "text": enc.decode_single_token_bytes(i).decode("utf-8", errors="replace")} for i in ids[:2000]],
+        "tokens": [
+            {"id": i, "text": enc.decode_single_token_bytes(i).decode("utf-8", errors="replace")}
+            for i in ids[:2000]
+        ],
         "bm25_tokens": lexical_tokens(req.text),
     }
 
@@ -222,3 +317,9 @@ def embed(req: EmbedRequest):
         "preview": [[round(x, 4) for x in v[:24]] for v in vectors],
         "similarity": cosine_matrix(vectors),
     }
+
+
+# A production build can be served from the same origin as the API.
+frontend_dist = PROJECT_DIR / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

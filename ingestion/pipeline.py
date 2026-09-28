@@ -15,7 +15,7 @@ from ingestion.models import (
     Trust,
     utcnow,
 )
-from ingestion.parsers import detect_mime, parse
+from ingestion.parsers import SUPPORTED_EXTENSIONS, detect_mime, parse
 from ingestion.registry import Registry
 from ingestion.services.chunker import Chunker
 from ingestion.services.embedder import Embedder, create_embedder
@@ -156,9 +156,7 @@ class Pipeline:
                     if not source_url or not in_scope(source_url):
                         raise ValueError("Website source must be an allowed public KBTU URL")
                 extension = Path(filename).suffix.lower()
-                extension = (
-                    extension if extension in {".pdf", ".docx", ".doc", ".html", ".htm"} else ".bin"
-                )
+                extension = extension if extension in SUPPORTED_EXTENSIONS | {".doc"} else ".bin"
                 raw_path = self.data / "raw" / channel / f"{binary}{extension}"
                 save_raw(raw_path, data)
                 provenance = {
@@ -180,7 +178,7 @@ class Pipeline:
                     )
                     event("DOCUMENT_DUPLICATE", doc_id=duplicate.doc_id, reason="binary_hash")
                 else:
-                    mime = detect_mime(data)
+                    mime = detect_mime(data, filename)
                     parsed = parse(
                         data,
                         mime,
@@ -371,6 +369,17 @@ class Pipeline:
             doc.metadata.setdefault("trust_audit", []).append(
                 {"trust_level": trust, "reason": reason, "at": utcnow().isoformat()}
             )
+            row = self.registry.row(doc_id)
+            self.registry.save(doc, row["status"], row["chunks_count"])
+            self._reconcile(doc.logical_document_key)
+            return self.registry.get(doc_id)
+
+    def archive(self, doc_id: str):
+        """Exclude a document from retrieval while retaining its original and audit trail."""
+        with self.lock:
+            doc = self.registry.get(doc_id)
+            doc.metadata["archived_at"] = utcnow().isoformat()
+            doc.is_current = False
             row = self.registry.row(doc_id)
             self.registry.save(doc, row["status"], row["chunks_count"])
             self._reconcile(doc.logical_document_key)

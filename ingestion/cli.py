@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ingestion.config import Settings
+from ingestion.parsers import SUPPORTED_EXTENSIONS
 from ingestion.pipeline import Pipeline
 
 
@@ -94,7 +95,7 @@ def main(argv=None) -> int:
                         for p in args.path.rglob("*")
                         if p.is_file()
                         and not p.is_symlink()
-                        and p.suffix.lower() in {".pdf", ".docx", ".doc", ".html", ".htm"}
+                        and p.suffix.lower() in SUPPORTED_EXTENSIONS | {".doc"}
                     )
                 else:
                     paths = [args.path]

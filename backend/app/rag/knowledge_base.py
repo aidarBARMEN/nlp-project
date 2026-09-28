@@ -1,4 +1,5 @@
 """In-memory зеркало коллекции: payload'ы всех чанков + BM25-индекс для лексического поиска."""
+
 from __future__ import annotations
 
 import threading
@@ -20,7 +21,10 @@ class KnowledgeBase:
     def reload(self) -> None:
         chunks = get_vector_store().all_payloads()
         ids = list(chunks)
-        corpus = [chunks[i].get("bm25_tokens") or lexical_tokens(chunks[i]["text"]) for i in ids]
+        corpus = [
+            chunks[i].get("bm25_tokens") or lexical_tokens(chunks[i]["text"]) or ["__empty__"]
+            for i in ids
+        ]
         bm25 = BM25Okapi(corpus) if corpus else None
         with self._lock:
             self.chunks, self._ids, self._bm25 = chunks, ids, bm25

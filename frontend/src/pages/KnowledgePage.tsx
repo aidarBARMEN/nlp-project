@@ -42,7 +42,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
     run('upload', async () => {
       const r = await api.upload(files)
       return [
-        ...r.indexed.map((d) => ({ ok: true, text: `${d.file_name}: ${d.chunks} чанков, ${d.tokens.toLocaleString('ru')} токенов` })),
+        ...r.indexed.map((d) => ({ ok: true, text: `${d.file_name}: ${d.status === 'pending' ? 'подготовлен, ожидает индексации' : 'проиндексирован'}, ${d.chunks} фрагментов` })),
         ...r.errors.map((e) => ({ ok: false, text: `${e.file_name}: ${e.error}` })),
       ]
     })
@@ -51,7 +51,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
     run(reset ? 'reset' : 'sync', async () => {
       const r = await api.sync(reset)
       return [
-        ...r.indexed.map((d) => ({ ok: true, text: `Проиндексирован ${d.file_name} (${d.chunks} чанков)` })),
+        ...r.indexed.map((d) => ({ ok: true, text: `${d.file_name}: ${d.status === 'pending' ? 'подготовлен' : 'проиндексирован'} (${d.chunks} фрагментов)` })),
         ...r.removed.map((f) => ({ ok: true, text: `Удалён из базы ${f}` })),
         ...r.errors.map((e) => ({ ok: false, text: `${e.file_name}: ${e.error}` })),
         { ok: true, text: `Синхронизация: +${r.indexed.length}, без изменений ${r.skipped.length}, удалено ${r.removed.length}` },
@@ -59,11 +59,23 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
     })
 
   const remove = (d: DocumentInfo) =>
-    confirm(`Удалить «${d.title}» из базы знаний и с диска?`) &&
+    confirm(`Убрать «${d.title}» из поиска? Оригинал и история останутся в архиве.`) &&
     run('delete', async () => {
       await api.deleteDocument(d.doc_id)
-      return [{ ok: true, text: `Удалён ${d.file_name}` }]
+      return [{ ok: true, text: `Отправлен в архив ${d.file_name}` }]
     })
+
+  const verify = (d: DocumentInfo) =>
+    confirm(`Вы проверили, что «${d.title}» — официальный документ КБТУ? После индексации он сможет использоваться в ответах.`) &&
+    run('trust', async () => {
+      await api.setTrust(d.doc_id, 'official', 'Оператор подтвердил официальный источник в интерфейсе')
+      return [{ ok: true, text: `Подтверждён источник: ${d.title}` }]
+    })
+
+  const revoke = (d: DocumentInfo) => run('trust', async () => {
+    await api.setTrust(d.doc_id, 'unverified', 'Оператор отправил источник на повторную проверку')
+    return [{ ok: true, text: `Документ отправлен на проверку: ${d.title}` }]
+  })
 
   return (
     <div className="scrollbar-thin flex-1 overflow-y-auto">
@@ -72,8 +84,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
           <div>
             <h1 className="font-display text-2xl font-bold text-navy-900">База знаний</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Документы → парсинг → чанки по {health?.chunk_size ?? '…'} токенов (overlap {health?.chunk_overlap ?? '…'}) →
-              эмбеддинги {health?.embedding_model ?? ''} → {health?.vector_db ?? 'Qdrant'}
+              Загрузите документы и подтвердите их происхождение. В ответах используются только действующие официальные источники.
             </p>
           </div>
           <div className="flex gap-2">
@@ -82,10 +93,10 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
               disabled={!!busy}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium shadow-sm transition hover:border-slate-300 disabled:opacity-50"
             >
-              <RefreshCw size={15} className={clsx(busy === 'sync' && 'animate-spin')} /> Синхронизировать папку
+              <RefreshCw size={15} className={clsx(busy === 'sync' && 'animate-spin')} /> Обновить базу
             </button>
             <button
-              onClick={() => confirm('Удалить все векторы и проиндексировать всё заново?') && sync(true)}
+              onClick={() => confirm('Пересчитать embeddings всех сохранённых документов через OpenAI? Это использует API.') && sync(true)}
               disabled={!!busy}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
             >
@@ -127,6 +138,9 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
             {busy === 'upload' ? 'Индексирую документы…' : 'Перетащите файлы или нажмите для выбора'}
           </div>
           <div className="mt-1 text-xs text-slate-500">PDF, DOCX, Markdown, TXT, HTML, XLSX, CSV</div>
+          <div className="mt-2 text-xs text-slate-500">
+            {health?.openai_key ? 'После загрузки подтвердите официальный источник в списке ниже.' : 'Без API-ключа файлы будут подготовлены. После настройки ключа нажмите «Обновить базу».'}
+          </div>
           <input
             ref={inputRef}
             type="file"
@@ -157,7 +171,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
 
         <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-700">
-            Проиндексированные документы
+            Документы и состояние обработки
           </div>
           {loading ? (
             <div className="flex justify-center py-10">
@@ -165,8 +179,8 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
             </div>
           ) : docs.length === 0 ? (
             <div className="px-5 py-10 text-center text-sm text-slate-500">
-              Пока пусто. Загрузите файлы выше или положите их в <code className="rounded bg-slate-100 px-1">backend/data/documents</code> и
-              нажмите «Синхронизировать папку».
+              Пока пусто. Загрузите файлы выше или добавьте их в <code className="rounded bg-slate-100 px-1">data/inbox/manual</code> и
+              нажмите «Обновить базу».
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -174,7 +188,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                 <thead className="bg-slate-50 text-left text-xs text-slate-500 uppercase">
                   <tr>
                     <th className="px-5 py-2.5 font-medium">Документ</th>
-                    <th className="px-3 py-2.5 font-medium">Категория</th>
+                    <th className="px-3 py-2.5 font-medium">Статус</th>
                     <th className="px-3 py-2.5 text-right font-medium">Стр.</th>
                     <th className="px-3 py-2.5 text-right font-medium">Чанки</th>
                     <th className="px-3 py-2.5 text-right font-medium">Токены</th>
@@ -193,13 +207,23 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        {d.category && <span className="rounded-md bg-brand-50 px-2 py-0.5 text-xs text-brand-700">{d.category}</span>}
+                        <div className="text-xs text-slate-600">{{ pending: 'Ожидает индексации', processing: 'Индексируется', processed: 'Проиндексирован', needs_ocr: 'Нужно распознавание', failed: 'Ошибка' }[d.status]}</div>
+                        <div className={clsx('mt-1 text-xs', d.trust_level === 'official' ? 'text-emerald-700' : 'text-amber-700')}>
+                          {d.trust_level === 'official' ? (d.is_current ? 'Официальный · действующий' : 'Официальный') : 'Источник не подтверждён'}
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-slate-600">{d.pages ?? '—'}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-slate-600">{d.chunks}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-slate-600">{d.tokens.toLocaleString('ru')}</td>
                       <td className="px-3 py-3">
                         <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => d.trust_level === 'official' ? revoke(d) : verify(d)}
+                            disabled={!!busy}
+                            className="rounded-lg px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                          >
+                            {d.trust_level === 'official' ? 'На проверку' : 'Подтвердить'}
+                          </button>
                           <a
                             href={api.fileUrl(d.doc_id)}
                             target="_blank"
@@ -213,7 +237,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                             onClick={() => remove(d)}
                             disabled={!!busy}
                             className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
-                            title="Удалить"
+                            title="Убрать в архив"
                           >
                             <Trash2 size={15} />
                           </button>

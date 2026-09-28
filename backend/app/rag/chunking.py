@@ -54,12 +54,12 @@ def chunk_blocks(blocks: list[Block], chunk_size: int, overlap: int) -> list[Chu
         buf_tokens = 0
         has_new = False  # есть ли в буфере что-то кроме overlap-хвоста прошлого чанка
 
-        def flush():
+        def flush(current_section=section):
             nonlocal buf, buf_tokens, has_new
             has_new = False
             text = "\n\n".join(t for t, _, _ in buf)
             pages = [p for _, p, _ in buf if p is not None]
-            chunks.append(Chunk(text, section, min(pages, default=None), max(pages, default=None), len(enc.encode(text))))
+            chunks.append(Chunk(text, current_section, min(pages, default=None), max(pages, default=None), len(enc.encode(text))))
             # overlap: оставляем последние абзацы суммарно ≤ overlap токенов
             tail, tail_tokens = [], 0
             for item in reversed(buf):

@@ -1,80 +1,84 @@
-"""Векторная база данных Qdrant (локальный режим или сервер)."""
-from __future__ import annotations
+"""Read the canonical ingestion collection; never create a competing vector schema."""
 
 from functools import lru_cache
+from threading import RLock
 
 from qdrant_client import QdrantClient
-from qdrant_client.http import models as qm
+
+from ingestion.services.indexer import Indexer, knowledge_filter
 
 from ..config import get_settings
-from .llm import embed_query
-
-KNOWN_DIMS = {"text-embedding-3-small": 1536, "text-embedding-3-large": 3072, "text-embedding-ada-002": 1536}
 
 
 class VectorStore:
-    def __init__(self):
-        s = get_settings()
-        self.collection = s.qdrant_collection
-        if s.qdrant_url:
-            self.client = QdrantClient(url=s.qdrant_url)
-        else:
-            s.qdrant_local_path.mkdir(parents=True, exist_ok=True)
-            self.client = QdrantClient(path=str(s.qdrant_local_path))
-        self.mode = "server" if s.qdrant_url else "embedded"
+    def __init__(self, client: QdrantClient | None = None):
+        self.settings = get_settings()
+        self.indexer = Indexer(self.settings, client, force_disable_check_same_thread=True)
+        self.client = self.indexer.client
+        self.collection = self.settings.qdrant_collection
+        self.mode = "server" if self.settings.qdrant_url else "embedded"
+        self.lock = RLock()
 
-    def ensure_collection(self) -> None:
-        if self.client.collection_exists(self.collection):
-            return
-        model = get_settings().openai_embedding_model
-        dim = KNOWN_DIMS.get(model) or len(embed_query("dimension probe"))
-        self.client.create_collection(
-            self.collection,
-            vectors_config=qm.VectorParams(size=dim, distance=qm.Distance.COSINE),
-        )
-
-    def upsert(self, ids: list[str], vectors: list[list[float]], payloads: list[dict]) -> None:
-        self.ensure_collection()
-        for i in range(0, len(ids), 128):
-            self.client.upsert(
-                self.collection,
-                points=qm.Batch(ids=ids[i : i + 128], vectors=vectors[i : i + 128], payloads=payloads[i : i + 128]),
-            )
-
-    def delete_document(self, doc_id: str) -> None:
+    def validate(self) -> bool:
         if not self.client.collection_exists(self.collection):
-            return
-        self.client.delete(
-            self.collection,
-            points_selector=qm.FilterSelector(
-                filter=qm.Filter(must=[qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=doc_id))])
-            ),
-        )
+            return False
+        self.indexer.ensure(self.settings.dense_dimensions)
+        return True
 
     def search(self, vector: list[float], limit: int) -> list[tuple[str, float]]:
-        if not self.client.collection_exists(self.collection):
-            return []
-        res = self.client.query_points(self.collection, query=vector, limit=limit, with_payload=False)
-        return [(str(p.id), float(p.score)) for p in res.points]
+        with self.lock:
+            if not self.validate():
+                return []
+            res = self.client.query_points(
+                self.collection,
+                query=vector,
+                using="dense",
+                limit=limit,
+                query_filter=knowledge_filter(),
+                with_payload=False,
+            )
+            return [(str(p.id), float(p.score)) for p in res.points]
 
     def all_payloads(self) -> dict[str, dict]:
-        if not self.client.collection_exists(self.collection):
-            return {}
-        out, offset = {}, None
-        while True:
-            points, offset = self.client.scroll(
-                self.collection, limit=512, offset=offset, with_payload=True, with_vectors=False
-            )
-            for p in points:
-                out[str(p.id)] = p.payload
-            if offset is None:
-                return out
+        with self.lock:
+            if not self.validate():
+                return {}
+            out, offset = {}, None
+            while True:
+                points, offset = self.client.scroll(
+                    self.collection,
+                    scroll_filter=knowledge_filter(),
+                    limit=512,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in points:
+                    payload = dict(point.payload or {})
+                    # Preserve the frontend contract while retaining canonical metadata.
+                    payload.update(
+                        {
+                            "file_name": payload.get("original_filename")
+                            or payload.get("title", ""),
+                            "url": payload.get("source_url"),
+                            "indexed_at": payload.get("fetched_at"),
+                            "token_count": payload.get("metadata", {}).get("token_count", 0),
+                        }
+                    )
+                    out[str(point.id)] = payload
+                if offset is None:
+                    return out
 
-    def reset(self) -> None:
-        if self.client.collection_exists(self.collection):
-            self.client.delete_collection(self.collection)
+    def close(self) -> None:
+        self.indexer.close()
 
 
 @lru_cache
 def get_vector_store() -> VectorStore:
     return VectorStore()
+
+
+def close_vector_store() -> None:
+    if get_vector_store.cache_info().currsize:
+        get_vector_store().close()
+        get_vector_store.cache_clear()

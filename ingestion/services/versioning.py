@@ -13,6 +13,7 @@ def current_version(documents: list[CanonicalDocument], today: date | None = Non
         for d in documents
         if (not d.effective_from or d.effective_from <= today)
         and (not d.effective_to or today <= d.effective_to)
+        and not d.metadata.get("archived_at")
     ]
     if not eligible:
         return None

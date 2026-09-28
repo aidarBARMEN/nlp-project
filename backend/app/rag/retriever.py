@@ -1,4 +1,5 @@
 """Retrieval: обработка запроса -> гибридный поиск (Dense + BM25) -> RRF -> реранкинг."""
+
 from __future__ import annotations
 
 import json
@@ -43,10 +44,13 @@ def rewrite_with_history(question: str, history: list[dict]) -> str:
         model=get_settings().openai_chat_model,
         temperature=0,
         messages=[
-            {"role": "system", "content": (
-                "Перепиши последний вопрос пользователя в самостоятельный поисковый запрос по документам КБТУ, "
-                "раскрыв местоимения и контекст из диалога. Сохрани язык вопроса. Верни только запрос."
-            )},
+            {
+                "role": "system",
+                "content": (
+                    "Перепиши последний вопрос пользователя в самостоятельный поисковый запрос по документам КБТУ, "
+                    "раскрыв местоимения и контекст из диалога. Сохрани язык вопроса. Верни только запрос."
+                ),
+            },
             {"role": "user", "content": f"Диалог:\n{dialog}\n\nПоследний вопрос: {question}"},
         ],
     )
@@ -56,23 +60,30 @@ def rewrite_with_history(question: str, history: list[dict]) -> str:
 def llm_rerank(query: str, candidates: list[dict]) -> list[dict]:
     """Переранжировка кандидатов LLM-судьёй (аналог cross-encoder): оценка релевантности 0–10."""
     passages = "\n\n".join(
-        f"[{i}] ({c['title']}; {c.get('section') or '-'})\n{c['text'][:900]}" for i, c in enumerate(candidates)
+        f"[{i}] ({c['title']}; {c.get('section') or '-'})\n{c['text'][:900]}"
+        for i, c in enumerate(candidates)
     )
     resp = get_client().chat.completions.create(
         model=get_settings().openai_chat_model,
         temperature=0,
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": (
-                "Ты — реранкер для поисковой системы. Оцени, насколько каждый фрагмент помогает ответить на вопрос, "
-                "по шкале 0–10 (10 — содержит прямой ответ, 0 — не относится). "
-                'Ответ строго в JSON: {"scores": [{"i": <номер>, "s": <оценка>}, ...]} для всех фрагментов.'
-            )},
+            {
+                "role": "system",
+                "content": (
+                    "Ты — реранкер для поисковой системы. Оцени, насколько каждый фрагмент помогает ответить на вопрос, "
+                    "по шкале 0–10 (10 — содержит прямой ответ, 0 — не относится). "
+                    'Ответ строго в JSON: {"scores": [{"i": <номер>, "s": <оценка>}, ...]} для всех фрагментов.'
+                ),
+            },
             {"role": "user", "content": f"Вопрос: {query}\n\nФрагменты:\n{passages}"},
         ],
     )
     try:
-        scores = {int(x["i"]): float(x["s"]) for x in json.loads(resp.choices[0].message.content)["scores"]}
+        scores = {
+            int(x["i"]): float(x["s"])
+            for x in json.loads(resp.choices[0].message.content)["scores"]
+        }
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
         log.warning("reranker returned invalid JSON, keeping RRF order")
         return candidates
@@ -82,6 +93,19 @@ def llm_rerank(query: str, candidates: list[dict]) -> list[dict]:
 
 
 def hybrid_search(query: str, final_k: int | None = None, rerank: bool | None = None) -> dict:
+    with get_vector_store().lock:
+        kb.reload()
+        if not kb.chunks:
+            return {
+                "query": query,
+                "expanded_query": expand_abbreviations(query),
+                "results": [],
+                "candidates": [],
+            }
+        return _hybrid_search(query, final_k, rerank)
+
+
+def _hybrid_search(query: str, final_k: int | None = None, rerank: bool | None = None) -> dict:
     s = get_settings()
     final_k = final_k or s.final_k
     rerank = (s.reranker == "llm") if rerank is None else rerank
@@ -109,4 +133,9 @@ def hybrid_search(query: str, final_k: int | None = None, rerank: bool | None = 
     if rerank and len(candidates) > 1:
         candidates = llm_rerank(query, candidates)
 
-    return {"query": query, "expanded_query": expanded, "results": candidates[:final_k], "candidates": candidates}
+    return {
+        "query": query,
+        "expanded_query": expanded,
+        "results": candidates[:final_k],
+        "candidates": candidates,
+    }

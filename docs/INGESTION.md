@@ -13,7 +13,7 @@ python -m venv .venv
 # Windows PowerShell
 .venv\Scripts\Activate.ps1
 # Linux/macOS: source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[app,dev]"
 ```
 
 Скопируйте `.env.example` в `.env` (PowerShell: `Copy-Item .env.example .env`).
@@ -89,7 +89,8 @@ python -m ingestion.cli ingest-file "path/to/Academic Policy.pdf"
 python -m ingestion.cli ingest-file "path/to/file.docx" --source-channel telegram
 ```
 
-Поддерживаются PDF, DOCX, HTML; тип проверяется по содержимому. Файлы в inbox
+Поддерживаются PDF, DOCX, HTML, UTF-8 TXT/Markdown/CSV и XLSX; бинарные форматы
+проверяются по содержимому, текстовые — также по расширению. Файлы в inbox
 не перемещаются. Успех отмечается в `data/processed`, каждый запуск повторно
 проверяет хеш, поэтому изменение файла обнаруживается. Повторный импорт одинаковых
 байтов или нормализованного текста не создаёт повторных chunks. Дополнительные
@@ -175,11 +176,15 @@ data/registry.sqlite3                         документы, версии, 
 data/qdrant/                                  локальный индекс (если URL пустой)
 ```
 
-Реестр использует SQLite WAL и межпроцессную блокировку писателя. Это самостоятельное
-хранилище ingestion; база приложения партнёра не изменяется. Для нескольких
+Реестр использует SQLite WAL и межпроцессную блокировку писателя. Backend подключён
+к этому же реестру через Pipeline, отдельная база документов не создаётся. Для нескольких
 серверов понадобится общий реестр/очередь и распределённая блокировка: текущая
 версия рассчитана на один ingestion worker с постоянным локальным диском.
 Резервируйте весь DATA_DIR и snapshot серверного Qdrant совместно.
+
+В общем интерфейсе действие «Убрать в архив» устанавливает `metadata.archived_at`.
+Такой документ не участвует в выборе действующей версии; его оригинал и chunks
+сохраняются. Повторная синхронизация inbox не возвращает его в поиск.
 
 SQLite и Qdrant не образуют общей транзакции. Новые chunks сначала `staging`, затем
 публикуются как `ready`. Реестр хранит состояние синхронизации. При сбое старые

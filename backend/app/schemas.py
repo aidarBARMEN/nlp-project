@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ingestion.models import Trust
+
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
@@ -26,3 +28,8 @@ class TokenizeRequest(BaseModel):
 
 class EmbedRequest(BaseModel):
     texts: list[str] = Field(min_length=1, max_length=8)
+
+
+class TrustRequest(BaseModel):
+    trust_level: Trust
+    reason: str = Field(min_length=3, max_length=500)

@@ -44,9 +44,16 @@ def knowledge_filter(*, current=True, trust_levels=("official",), **fields) -> q
 
 
 class Indexer:
-    def __init__(self, settings: Settings, client: QdrantClient | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        client: QdrantClient | None = None,
+        *,
+        force_disable_check_same_thread: bool = False,
+    ):
         self.settings = settings
         self.collection = settings.qdrant_collection
+        self._owns_client = client is None
         self.client = client or (
             QdrantClient(
                 url=settings.qdrant_url,
@@ -56,7 +63,10 @@ class Indexer:
                 timeout=60,
             )
             if settings.qdrant_url
-            else QdrantClient(path=str(settings.data_dir / "qdrant"))
+            else QdrantClient(
+                path=str(settings.data_dir / "qdrant"),
+                force_disable_check_same_thread=force_disable_check_same_thread,
+            )
         )
 
     def ensure(self, dimension: int):
@@ -123,6 +133,7 @@ class Indexer:
                 payload.update(
                     {
                         "record_type": "chunk",
+                        "original_filename": document.original_filename,
                         "index_status": "staging",
                         "is_current": False,
                         "category": document.category,
@@ -187,4 +198,5 @@ class Indexer:
                 return points
 
     def close(self):
-        self.client.close()
+        if self._owns_client:
+            self.client.close()

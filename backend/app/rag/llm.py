@@ -5,6 +5,8 @@ from functools import lru_cache
 import numpy as np
 from openai import OpenAI
 
+from ingestion.services.embedder import OpenAIEmbedder
+
 from ..config import get_settings
 
 
@@ -16,20 +18,20 @@ class MissingAPIKey(RuntimeError):
 def get_client() -> OpenAI:
     settings = get_settings()
     if not settings.has_openai_key:
-        raise MissingAPIKey("OPENAI_API_KEY не задан. Вставьте ключ в backend/.env и перезапустите сервер.")
-    return OpenAI(api_key=settings.openai_api_key)
+        raise MissingAPIKey(
+            "OPENAI_API_KEY не задан. Вставьте ключ в корневой .env и перезапустите сервер."
+        )
+    return OpenAI(
+        api_key=settings.openai_api_key.get_secret_value(),
+        base_url="https://api.openai.com/v1",
+        timeout=settings.openai_timeout,
+        max_retries=settings.openai_max_retries,
+    )
 
 
 def embed_texts(texts: list[str], batch_size: int = 96) -> list[list[float]]:
-    """Эмбеддинги OpenAI (векторы уже L2-нормализованы -> cosine = dot product)."""
-    client = get_client()
-    model = get_settings().openai_embedding_model
-    vectors: list[list[float]] = []
-    for i in range(0, len(texts), batch_size):
-        batch = [t.replace("\n", " ")[:30000] for t in texts[i : i + batch_size]]
-        resp = client.embeddings.create(model=model, input=batch)
-        vectors.extend(d.embedding for d in sorted(resp.data, key=lambda d: d.index))
-    return vectors
+    """Use the exact same model, dimensions and redaction as document ingestion."""
+    return OpenAIEmbedder(get_settings(), client=get_client()).embed(texts)
 
 
 def embed_query(text: str) -> list[float]:
@@ -45,3 +47,9 @@ def cosine_matrix(vectors: list[list[float]]) -> list[list[float]]:
 def is_flagged(text: str) -> bool:
     resp = get_client().moderations.create(model="omni-moderation-latest", input=text)
     return bool(resp.results[0].flagged)
+
+
+def close_client() -> None:
+    if get_client.cache_info().currsize:
+        get_client().close()
+        get_client.cache_clear()

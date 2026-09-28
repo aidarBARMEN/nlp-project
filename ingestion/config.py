@@ -1,14 +1,21 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(PROJECT_DIR / "backend" / ".env", PROJECT_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
-    data_dir: Path = Path("data")
+    data_dir: Path = PROJECT_DIR / "data"
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_collection: str = "kbtu_knowledge"
@@ -16,8 +23,9 @@ class Settings(BaseSettings):
     openai_timeout: float = Field(default=60, gt=0)
     openai_max_retries: int = Field(default=3, ge=0, le=10)
     embedding_provider: Literal["openai"] = "openai"
-    embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = (
-        "text-embedding-3-small"
+    embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = Field(
+        default="text-embedding-3-small",
+        validation_alias=AliasChoices("EMBEDDING_MODEL", "OPENAI_EMBEDDING_MODEL"),
     )
     embedding_dimensions: int | None = Field(default=None, ge=1)
     embedding_batch_size: int = Field(default=8, ge=1, le=256)
@@ -33,6 +41,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_overlap(self):
+        if not self.data_dir.is_absolute():
+            self.data_dir = (PROJECT_DIR / self.data_dir).resolve()
         if self.chunk_overlap >= self.chunk_tokens:
             raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_TOKENS")
         maximum = 1536 if self.embedding_model == "text-embedding-3-small" else 3072

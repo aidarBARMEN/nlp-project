@@ -171,11 +171,11 @@ function EmptyState({ onPick, health }: { onPick: (q: string) => void; health: H
 
       {health && !health.openai_key && (
         <Notice>
-          Не задан <b>OPENAI_API_KEY</b>. Вставьте ключ в <code>backend/.env</code> и перезапустите сервер.
+          Для ответов требуется ключ OpenAI. Укажите его в <code>.env</code> в корне проекта и перезапустите сервер.
         </Notice>
       )}
       {health && health.openai_key && health.chunks === 0 && (
-        <Notice>База знаний пуста — загрузите документы на вкладке «База знаний».</Notice>
+        <Notice>Подготовьте и подтвердите официальные документы на вкладке «База знаний».</Notice>
       )}
 
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

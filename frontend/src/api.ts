@@ -53,10 +53,14 @@ export interface DocumentInfo {
   chunks: number
   tokens: number
   pages: number | null
+  status: 'pending' | 'processing' | 'processed' | 'needs_ocr' | 'failed'
+  trust_level: 'official' | 'verified_internal' | 'unverified'
+  is_current: boolean
+  source_channel: string
 }
 
 export interface SyncReport {
-  indexed: { file_name: string; chunks: number; tokens: number }[]
+  indexed: { file_name: string; chunks: number; tokens: number; status: DocumentInfo['status'] }[]
   skipped: string[]
   removed: string[]
   errors: { file_name: string; error: string }[]
@@ -111,6 +115,8 @@ export const api = {
   documents: () => request<DocumentInfo[]>('/documents'),
   sync: (reset = false) => request<SyncReport>(`/documents/sync?reset=${reset}`, { method: 'POST' }),
   deleteDocument: (id: string) => request<{ deleted: string }>(`/documents/${id}`, { method: 'DELETE' }),
+  setTrust: (id: string, trust_level: DocumentInfo['trust_level'], reason: string) =>
+    request<DocumentInfo>(`/documents/${id}/trust`, json({ trust_level, reason })),
   upload: (files: File[]) => {
     const form = new FormData()
     files.forEach((f) => form.append('files', f))
