@@ -45,8 +45,8 @@ def chunk_blocks(blocks: list[Block], chunk_size: int, overlap: int) -> list[Chu
         section = group[0].section
         pieces: list[tuple[str, int | None]] = []
         for b in group:
-            if b.is_heading and len(group) > 1:
-                continue  # заголовок и так уходит в метаданные section
+            if b.is_heading:
+                continue  # заголовок уходит в метаданные section и в контекстный префикс эмбеддинга
             for part in _split_long(b.text, chunk_size, overlap):
                 pieces.append((part, b.page))
 
