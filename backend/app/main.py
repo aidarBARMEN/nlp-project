@@ -33,6 +33,7 @@ async def lifespan(_: FastAPI):
     settings.documents_path.mkdir(parents=True, exist_ok=True)
     kb.reload()
     yield
+    get_vector_store().client.close()
 
 
 app = FastAPI(title="KBTU Smart Assistant API", version="1.0.0", lifespan=lifespan)

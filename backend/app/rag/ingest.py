@@ -178,3 +178,4 @@ if __name__ == "__main__":
     parser.add_argument("--reset", action="store_true", help="удалить коллекцию и проиндексировать заново")
     args = parser.parse_args()
     print(json.dumps(sync_directory(reset=args.reset), ensure_ascii=False, indent=2))
+    get_vector_store().client.close()
