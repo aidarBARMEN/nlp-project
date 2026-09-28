@@ -1,0 +1,14 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic-settings>=2.4
+openai>=1.50
+qdrant-client>=1.11
+tiktoken>=0.8
+rank-bm25>=0.2.2
+snowballstemmer>=2.2
+pymupdf>=1.24
+python-docx>=1.1
+beautifulsoup4>=4.12
+openpyxl>=3.1
+numpy>=1.26

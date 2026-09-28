@@ -1,3 +1,4 @@
+# Python and local caches
 .venv/
 __pycache__/
 *.py[cod]
@@ -6,6 +7,8 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 .env
+.env.*
+!.env.example
 data/*
 !data/inbox/
 data/inbox/*
@@ -14,3 +17,20 @@ data/inbox/*
 data/inbox/telegram/**
 data/inbox/manual/**
 !data/inbox/**/.gitkeep
+venv/
+
+# data
+backend/data/qdrant/
+backend/data/documents/
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# os / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+~$*
