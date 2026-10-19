@@ -1,0 +1,35 @@
+# Необязательно: Qdrant как отдельный сервер (с веб-дашбордом http://localhost:6333/dashboard).
+# После запуска укажите в backend/.env: QDRANT_URL=http://localhost:6333
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # n8n: почта деканата -> backend /api/email/reply -> черновик в Gmail (docs/EMAIL_DRAFTS.md)
+  # Запуск: docker compose up -d n8n, затем http://localhost:5678
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Almaty
+      - TZ=Asia/Almaty
+      # адрес backend, запущенного на хосте (uvicorn ... --port 8000)
+      - KBTU_BACKEND_URL=http://host.docker.internal:8000
+      - EMAIL_API_TOKEN=${EMAIL_API_TOKEN:-}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_LOG_LEVEL=${N8N_LOG_LEVEL:-info}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  n8n_data:

@@ -1,0 +1,95 @@
+{
+  "id": "kbtuDeanDrafts01",
+  "name": "KBTU Деканат: черновики ответов на письма",
+  "nodes": [
+    {
+      "id": "a1f0c0de-0001-4000-8000-000000000001",
+      "name": "Новое письмо (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "format": "resolved",
+        "options": {
+          "customEmailConfig": "={{ JSON.stringify([\"UNSEEN\", [\"SINCE\", $today.toISODate()]]) }}"
+        }
+      },
+      "credentials": {
+        "imap": {
+          "id": "kbtuDeanImap0001",
+          "name": "Почта деканата (IMAP)"
+        }
+      }
+    },
+    {
+      "id": "a1f0c0de-0002-4000-8000-000000000002",
+      "name": "Ответ RAG → Черновики",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.KBTU_BACKEND_URL }}/api/email/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.EMAIL_API_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sender: $json.from?.value?.[0]?.address ?? '', sender_name: $json.from?.value?.[0]?.name ?? '', subject: $json.subject ?? '', body: $json.text || $json.html || '', message_id: $json.messageId ?? '', references: [].concat($json.references ?? []).join(' '), received_at: $json.date ?? null, headers: Object.fromEntries(($json.headerLines ?? []).filter(h => ['list-unsubscribe', 'list-id', 'precedence', 'auto-submitted'].includes(h.key)).map(h => [h.key, h.line.slice(0, 500)])), save_draft: true }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "a1f0c0de-0006-4000-8000-000000000006",
+      "name": "Описание",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -300
+      ],
+      "parameters": {
+        "width": 620,
+        "height": 260,
+        "content": "## Деканат КБТУ: автоответы в черновики\nIMAP приносит каждое новое непрочитанное письмо → backend `/api/email/reply` ищет ответ в базе знаний (RAG), пишет письмо от имени деканата и **сохраняет его в «Черновики» в той же цепочке**. Ничего не отправляется: сотрудник проверяет черновик и нажимает «Отправить».\n\n`status`: answered — ответ из документов; needs_review — в черновике «вопрос передан специалисту», дописать вручную; skipped — автоответ/рассылка/повтор, черновика нет.\n\nНастройка одной командой: `python scripts/setup_n8n.py` (docs/EMAIL_DRAFTS.md)."
+      }
+    }
+  ],
+  "connections": {
+    "Новое письмо (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Ответ RAG → Черновики",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty"
+  },
+  "pinData": {}
+}
