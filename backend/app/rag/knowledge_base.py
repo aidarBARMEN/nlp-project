@@ -17,17 +17,30 @@ class KnowledgeBase:
         self.chunks: dict[str, dict] = {}
         self._ids: list[str] = []
         self._bm25: BM25Okapi | None = None
+        self._tokens: dict[str, list[str]] = {}
 
     def reload(self) -> None:
-        chunks = get_vector_store().all_payloads()
-        ids = list(chunks)
-        corpus = [
-            chunks[i].get("bm25_tokens") or lexical_tokens(chunks[i]["text"]) or ["__empty__"]
-            for i in ids
-        ]
-        bm25 = BM25Okapi(corpus) if corpus else None
-        with self._lock:
-            self.chunks, self._ids, self._bm25 = chunks, ids, bm25
+        # Вызывается часто (в т.ч. из /api/health): токенизируем только новые чанки
+        # и перестраиваем BM25 лишь при изменении набора чанков. Замок хранилища
+        # (RLock) тот же, что берёт hybrid_search, — единый порядок без deadlock.
+        store = get_vector_store()
+        with store.lock:
+            chunks = store.all_payloads()
+            ids = list(chunks)
+            if set(ids) == set(self._ids):
+                with self._lock:
+                    self.chunks = chunks
+                return
+            self._tokens = {
+                i: self._tokens.get(i)
+                or chunks[i].get("bm25_tokens")
+                or lexical_tokens(chunks[i]["text"])
+                or ["__empty__"]
+                for i in ids
+            }
+            bm25 = BM25Okapi([self._tokens[i] for i in ids]) if ids else None
+            with self._lock:
+                self.chunks, self._ids, self._bm25 = chunks, ids, bm25
 
     def bm25_search(self, query: str, limit: int) -> list[tuple[str, float]]:
         with self._lock:
