@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import imaplib
 import json
 import logging
 import re
@@ -11,7 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +23,7 @@ from ingestion.config import PROJECT_DIR
 from ingestion.parsers import SUPPORTED_EXTENSIONS
 
 from .config import get_settings
-from .rag import generator
+from .rag import email_reply, evaluation, generator, mailbox
 from .rag.ingest import (
     get_document_file as document_file,
 )
@@ -36,11 +38,21 @@ from .rag.ingest import (
     list_documents as registry_documents,
 )
 from .rag.knowledge_base import kb
-from .rag.llm import MissingAPIKey, close_client, cosine_matrix, embed_texts, is_flagged
+from .rag.llm import MissingAPIKey, close_client, cosine_matrix, is_flagged
+from .rag.models import GenerationStats, OllamaUnavailable, default_llm, list_embedders, list_llms
+from .rag.models import embed as embed_model
 from .rag.retriever import hybrid_search, rewrite_with_history
 from .rag.tokenization import get_encoding, lexical_tokens
 from .rag.vector_store import close_vector_store, get_vector_store
-from .schemas import ChatRequest, EmbedRequest, SearchRequest, TokenizeRequest, TrustRequest
+from .schemas import (
+    ChatRequest,
+    EmailReplyRequest,
+    EmbedRequest,
+    EvalRunRequest,
+    SearchRequest,
+    TokenizeRequest,
+    TrustRequest,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
@@ -253,16 +265,21 @@ def chat_stream(req: ChatRequest):
                 {"query": query, "expanded_query": found["expanded_query"], "sources": sources},
             )
 
-            for token in generator.stream_answer(req.question, found["results"], history):
+            stats = GenerationStats()
+            for token in generator.stream_answer(
+                req.question, found["results"], history, model=req.model, stats=stats
+            ):
                 yield _sse("token", token)
             yield _sse(
                 "done",
                 {
                     "retrieval_ms": round(t_retrieval * 1000),
                     "total_ms": round((time.perf_counter() - t0) * 1000),
+                    "model": req.model or default_llm(),
+                    "tokens_per_s": stats.tokens_per_s,
                 },
             )
-        except (MissingAPIKey, ValueError) as e:
+        except (MissingAPIKey, ValueError, OllamaUnavailable) as e:
             yield _sse("error", {"detail": str(e)})
         except OpenAIError:
             yield _sse("error", {"detail": "Ошибка OpenAI. Проверьте ключ, квоту и соединение."})
@@ -286,10 +303,47 @@ def chat(req: ChatRequest):
     query = rewrite_with_history(req.question, history) if settings.query_rewrite else req.question
     found = hybrid_search(query)
     return {
-        "answer": generator.answer(req.question, found["results"], history),
+        "answer": generator.answer(req.question, found["results"], history, model=req.model),
+        "model": req.model or default_llm(),
         "query": query,
         "sources": [_source(i, c) for i, c in enumerate(found["results"], start=1)],
     }
+
+
+@app.post("/api/email/reply")
+def email_reply_draft(req: EmailReplyRequest, x_api_key: Annotated[str | None, Header()] = None):
+    """Черновик ответа деканата на письмо; вызывается из n8n, отправку делает человек."""
+    token = settings.email_api_token
+    if token and not hmac.compare_digest(x_api_key or "", token):
+        raise HTTPException(status_code=401, detail="Неверный X-API-Key")
+    if req.save_draft and not mailbox.claim(req.message_id):
+        return {"status": "skipped", "reason": "duplicate", "draft_saved": False}
+    result = email_reply.draft_reply(
+        req.sender,
+        req.sender_name,
+        req.subject,
+        req.body,
+        model=req.model,
+        headers=req.headers,
+        received_at=req.received_at,
+    )
+    result["draft_saved"] = False
+    if req.save_draft and result["status"] != "skipped":
+        draft = mailbox.build_draft(
+            req.sender,
+            result["subject"],
+            result["reply_text"],
+            result["reply_html"],
+            in_reply_to=req.message_id,
+            references=req.references,
+        )
+        try:
+            mailbox.save_draft(draft)
+        except (OSError, imaplib.IMAP4.error, mailbox.MailboxNotConfigured) as e:
+            mailbox.release(req.message_id)
+            raise HTTPException(status_code=502, detail=f"Черновик не сохранён: {e}") from e
+        result["draft_saved"] = True
+    return result
 
 
 @app.post("/api/search")
@@ -327,14 +381,36 @@ def embed(req: EmbedRequest):
     texts = [t.strip() for t in req.texts if t.strip()]
     if not texts:
         raise HTTPException(400, "Пустой ввод")
-    vectors = embed_texts(texts)
+    model = req.model or f"openai:{settings.embedding_model}"
+    vectors = embed_model(model, texts, kind="query").tolist()
     return {
-        "model": settings.openai_embedding_model,
+        "model": model,
         "dimensions": len(vectors[0]),
         "texts": texts,
         "preview": [[round(x, 4) for x in v[:24]] for v in vectors],
         "similarity": cosine_matrix(vectors),
     }
+
+
+# ---------------------------------------------------------------- models & evaluation
+@app.get("/api/models")
+def models():
+    return {"llms": list_llms(), "embedders": list_embedders(), "default_llm": default_llm()}
+
+
+@app.get("/api/eval/status")
+def eval_status():
+    return evaluation.status()
+
+
+@app.post("/api/eval/run")
+def eval_run(req: EvalRunRequest):
+    return evaluation.start(req.kind, req.models, req.limit)
+
+
+@app.get("/api/eval/results")
+def eval_results():
+    return evaluation.results()
 
 
 # A production build can be served from the same origin as the API.

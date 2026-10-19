@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BookOpen, FlaskConical, Menu, MessageSquare, MessageSquarePlus, Trash2, X } from 'lucide-react'
+import { BarChart3, BookOpen, FlaskConical, Menu, MessageSquare, MessageSquarePlus, Trash2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { api, type Health } from './api'
 import { useConversations } from './store'
 import ChatPage from './pages/ChatPage'
 import KnowledgePage from './pages/KnowledgePage'
 import LabPage from './pages/LabPage'
+import MetricsPage from './pages/MetricsPage'
 
-type Page = 'chat' | 'knowledge' | 'lab'
+type Page = 'chat' | 'knowledge' | 'lab' | 'metrics'
 
 const NAV: { id: Page; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Ассистент', icon: MessageSquare },
   { id: 'knowledge', label: 'База знаний', icon: BookOpen },
   { id: 'lab', label: 'NLP-лаборатория', icon: FlaskConical },
+  { id: 'metrics', label: 'Метрики моделей', icon: BarChart3 },
 ]
 
 export default function App() {
@@ -146,6 +148,7 @@ export default function App() {
         {page === 'chat' && <ChatPage convs={convs} health={health} />}
         {page === 'knowledge' && <KnowledgePage onChange={refreshHealth} health={health} />}
         {page === 'lab' && <LabPage />}
+        {page === 'metrics' && <MetricsPage />}
       </main>
     </div>
   )

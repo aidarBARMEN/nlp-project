@@ -1,10 +1,10 @@
 """Генерация ответа строго по найденному контексту, с цитатами [n]."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
 
-from ..config import get_settings
-from .llm import get_client
+from .models import GenerationStats, stream_chat
 
 NO_ANSWER = (
     "К сожалению, в официальных документах КБТУ нет информации по данному вопросу. "
@@ -31,11 +31,17 @@ def format_context(chunks: list[dict]) -> str:
         if c.get("section"):
             loc.append(f"раздел: {c['section']}")
         if c.get("page_start"):
-            p = c["page_start"] if c["page_start"] == c.get("page_end") else f"{c['page_start']}–{c['page_end']}"
+            p = (
+                c["page_start"]
+                if c["page_start"] == c.get("page_end")
+                else f"{c['page_start']}–{c['page_end']}"
+            )
             loc.append(f"стр. {p}")
         if c.get("academic_year"):
             loc.append(f"учебный год: {c['academic_year']}")
-        parts.append(f"[{i}] Документ: «{c['title']}» ({'; '.join(loc) or 'без раздела'})\n{c['text']}")
+        parts.append(
+            f"[{i}] Документ: «{c['title']}» ({'; '.join(loc) or 'без раздела'})\n{c['text']}"
+        )
     return "\n\n---\n\n".join(parts)
 
 
@@ -44,27 +50,30 @@ def build_messages(question: str, chunks: list[dict], history: list[dict]) -> li
     for m in history[-6:]:
         if m.get("role") in {"user", "assistant"} and m.get("content"):
             messages.append({"role": m["role"], "content": m["content"][:2000]})
-    messages.append({
-        "role": "user",
-        "content": f"Контекст из документов КБТУ:\n\n{format_context(chunks)}\n\n=====\n\nВопрос студента: {question}",
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": f"Контекст из документов КБТУ:\n\n{format_context(chunks)}\n\n=====\n\nВопрос студента: {question}",
+        }
+    )
     return messages
 
 
-def stream_answer(question: str, chunks: list[dict], history: list[dict]) -> Iterator[str]:
+def stream_answer(
+    question: str,
+    chunks: list[dict],
+    history: list[dict],
+    model: str | None = None,
+    stats: GenerationStats | None = None,
+) -> Iterator[str]:
+    """model — id из реестра (openai:gpt-4o-mini, ollama:qwen2.5:1.5b, ...); None = модель по умолчанию."""
     if not chunks:
         yield NO_ANSWER
         return
-    stream = get_client().chat.completions.create(
-        model=get_settings().openai_chat_model,
-        temperature=0.1,
-        stream=True,
-        messages=build_messages(question, chunks, history),
+    yield from stream_chat(
+        model, build_messages(question, chunks, history), temperature=0.1, stats=stats
     )
-    for event in stream:
-        if event.choices and (delta := event.choices[0].delta.content):
-            yield delta
 
 
-def answer(question: str, chunks: list[dict], history: list[dict]) -> str:
-    return "".join(stream_answer(question, chunks, history))
+def answer(question: str, chunks: list[dict], history: list[dict], model: str | None = None) -> str:
+    return "".join(stream_answer(question, chunks, history, model))

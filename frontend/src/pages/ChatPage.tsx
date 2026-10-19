@@ -17,6 +17,7 @@ import { streamChat, type ChatMessage, type Health } from '../api'
 import type { useConversations } from '../store'
 import Markdown from '../components/Markdown'
 import SourceCard from '../components/SourceCard'
+import ModelPicker, { useSelectedModel } from '../components/ModelPicker'
 
 const SUGGESTIONS = [
   { icon: GraduationCap, title: 'GPA и пересдачи', q: 'Как рассчитывается GPA и какие правила пересдачи (Retake)?' },
@@ -36,6 +37,7 @@ export default function ChatPage({ convs, health }: { convs: Convs; health: Heal
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messages = convs.active?.messages ?? []
+  const llm = useSelectedModel()
 
   useEffect(() => {
     const el = scrollRef.current
@@ -84,6 +86,7 @@ export default function ChatPage({ convs, health }: { convs: Convs; health: Heal
           onError: (detail) => patchLast((m) => ({ ...m, error: detail })),
         },
         ctrl.signal,
+        llm.model || undefined,
       )
     } catch {
       patchLast((m) => ({ ...m, error: 'Не удалось получить ответ. Попробуйте отправить вопрос ещё раз.' }))
@@ -152,9 +155,12 @@ export default function ChatPage({ convs, health }: { convs: Convs; health: Heal
             </button>
           )}
         </form>
-        <p className="mt-2 text-center text-[11px] text-slate-400">
-          Ответы основаны только на официальных документах КБТУ. Проверяйте важную информацию в Офисе Регистратора.
-        </p>
+        <div className="mx-auto mt-2 flex max-w-3xl flex-wrap items-center justify-between gap-2">
+          <ModelPicker model={llm.model} models={llm.models} onSelect={llm.select} disabled={busy} />
+          <p className="text-[11px] text-slate-400">
+            Ответы основаны только на официальных документах КБТУ. Проверяйте важную информацию в Офисе Регистратора.
+          </p>
+        </div>
       </div>
     </div>
   )
@@ -272,6 +278,8 @@ function MessageView({ m, streaming }: { m: ChatMessage; streaming: boolean }) {
               {m.meta?.total_ms !== undefined && (
                 <span>
                   поиск {m.meta.retrieval_ms} мс · всего {(m.meta.total_ms / 1000).toFixed(1)} с
+                  {m.meta.model && ` · ${m.meta.model.split(':').slice(1).join(':')}`}
+                  {m.meta.tokens_per_s ? ` · ${m.meta.tokens_per_s} ток/с` : ''}
                 </span>
               )}
             </div>

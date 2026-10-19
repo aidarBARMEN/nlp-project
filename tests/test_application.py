@@ -1,5 +1,6 @@
 """Exercise the actual UI API contract and persistent Qdrant; only OpenAI is mocked."""
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -8,7 +9,15 @@ from fastapi.testclient import TestClient
 
 from backend.app import main
 from backend.app.config import Settings
-from backend.app.rag import ingest, llm, retriever, tokenization, vector_store
+from backend.app.rag import (
+    email_reply,
+    ingest,
+    llm,
+    mailbox,
+    retriever,
+    tokenization,
+    vector_store,
+)
 from ingestion.config import Settings as IngestionSettings
 from ingestion.services import embedder
 
@@ -23,7 +32,7 @@ def application(tmp_path, monkeypatch):
         reranker="none",
         query_rewrite=False,
     )
-    for module in (main, ingest, llm, retriever, tokenization, vector_store):
+    for module in (main, email_reply, ingest, llm, mailbox, retriever, tokenization, vector_store):
         monkeypatch.setattr(module, "get_settings", lambda: config)
     monkeypatch.setattr(main, "settings", config)
     monkeypatch.setattr(ingest, "BACKEND_DIR", tmp_path / "legacy-backend")
@@ -37,7 +46,8 @@ def application(tmp_path, monkeypatch):
     client.chat.completions.create.side_effect = lambda **kwargs: iter(
         [
             SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="Register for exams. [1]"))]
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="Register for exams. [1]"))],
+                usage=None,
             )
         ]
     )
@@ -246,3 +256,120 @@ def test_sync_retries_ocr_from_retained_raw_without_api_key(application, monkeyp
             "\n".join(block["text"] for block in artifact["parsed"]["blocks"])
         )
     sdk.embeddings.create.assert_not_called()
+
+
+def test_email_reply_draft_for_dean_office(application, pdf_factory, monkeypatch):
+    api, config, sdk = application
+    monkeypatch.setattr(config, "email_own_address", "dean@kbtu.kz")
+    letter = {
+        "sender": "student@kbtu.kz",
+        "sender_name": "Aruzhan Bekova",
+        "subject": "Exam registration",
+        "body": "<p>Hello! How do I register for exams?</p>"
+        "<div>On Mon, 1 Sep 2026 Dean wrote:</div><blockquote>old text</blockquote>",
+    }
+
+    pending = api.post("/api/email/reply", json=letter).json()
+    assert pending["status"] == "needs_review" and pending["subject"] == "Re: Exam registration"
+    assert "forwarded" in pending["reply_text"] and pending["sources"] == []
+    sdk.chat.completions.create.assert_not_called()
+
+    trust(api, upload(api, pdf_factory())["doc_id"])
+    draft = api.post("/api/email/reply", json=letter).json()
+    assert draft["status"] == "answered" and draft["language"] == "en"
+    assert draft["reply_text"].startswith("Dear Aruzhan,")
+    assert "Register for exams." in draft["reply_text"]
+    assert "Academic Policy 2026" in draft["reply_text"] and draft["sources"]
+    assert "<p>" in draft["reply_html"]
+    prompt = sdk.chat.completions.create.call_args.kwargs["messages"][-1]["content"]
+    assert "How do I register" in prompt and "old text" not in prompt
+
+    for sender in ("no-reply@service.com", "Dean <dean@kbtu.kz>"):
+        skipped = api.post("/api/email/reply", json={**letter, "sender": sender}).json()
+        assert skipped["status"] == "skipped"
+
+    monkeypatch.setattr(config, "email_api_token", "secret")
+    assert api.post("/api/email/reply", json=letter).status_code == 401
+    ok = api.post("/api/email/reply", json=letter, headers={"X-API-Key": "secret"})
+    assert ok.status_code == 200
+
+
+def test_email_reply_escalates_when_documents_have_no_answer(application, pdf_factory):
+    api, _, sdk = application
+    trust(api, upload(api, pdf_factory())["doc_id"])
+    sdk.chat.completions.create.side_effect = lambda **kwargs: iter(
+        [
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="ESCALATE"))], usage=None
+            )
+        ]
+    )
+    letter = {"sender": "s@kbtu.kz", "subject": "Общежитие", "body": "Можно ли заселиться?"}
+    draft = api.post("/api/email/reply", json=letter).json()
+    assert draft["status"] == "needs_review" and draft["language"] == "ru"
+    assert draft["reply_text"].startswith("Здравствуйте!")
+    assert "передан специалисту" in draft["reply_text"] and "ESCALATE" not in draft["reply_text"]
+    assert draft["reply_text"].endswith("Деканат КБТУ")
+
+
+def test_email_reply_saves_draft_once_into_thread(application, pdf_factory, monkeypatch):
+    api, config, _ = application
+    monkeypatch.setattr(config, "email_own_address", "dean@gmail.com")
+    monkeypatch.setattr(config, "email_app_password", "abcd efgh ijkl mnop")
+    trust(api, upload(api, pdf_factory())["doc_id"])
+    imap = Mock()
+    imap.__enter__ = Mock(return_value=imap)
+    imap.__exit__ = Mock(return_value=False)
+    imap.list.return_value = (
+        "OK",
+        [rb'(\HasNoChildren) "/" "INBOX"', rb'(\Drafts \HasNoChildren) "/" "[Gmail]/Drafts"'],
+    )
+    monkeypatch.setattr(mailbox.imaplib, "IMAP4_SSL", Mock(return_value=imap))
+    letter = {
+        "sender": "student@kbtu.kz",
+        "sender_name": "Aruzhan",
+        "subject": "Exams",
+        "body": "How do I register for exams?",
+        "message_id": "<q1@kbtu.kz>",
+        "references": "<q0@kbtu.kz>",
+        "save_draft": True,
+    }
+
+    draft = api.post("/api/email/reply", json=letter).json()
+    assert draft["status"] == "answered" and draft["draft_saved"] is True
+    imap.login.assert_called_once_with("dean@gmail.com", "abcdefghijklmnop")
+    folder, flags, _, raw = imap.append.call_args.args
+    assert folder == '"[Gmail]/Drafts"' and flags == r"(\Draft)"
+    assert b"In-Reply-To: <q1@kbtu.kz>" in raw and b"Subject: Re: Exams" in raw
+    assert b"References: <q0@kbtu.kz> <q1@kbtu.kz>" in raw and b"To: student@kbtu.kz" in raw
+
+    again = api.post("/api/email/reply", json=letter).json()
+    assert again == {"status": "skipped", "reason": "duplicate", "draft_saved": False}
+    assert imap.append.call_count == 1
+
+    imap.append.side_effect = OSError("network down")
+    failed = api.post("/api/email/reply", json={**letter, "message_id": "<q2@kbtu.kz>"})
+    assert failed.status_code == 502
+    imap.append.side_effect = None
+    retried = api.post("/api/email/reply", json={**letter, "message_id": "<q2@kbtu.kz>"})
+    assert retried.json()["draft_saved"] is True
+
+
+def test_email_reply_skips_mailing_lists_and_old_mail(application, monkeypatch):
+    api, config, sdk = application
+    monkeypatch.setattr(
+        config, "email_start_after", datetime.fromisoformat("2026-10-12T18:00:00+05:00")
+    )
+    letter = {"sender": "shop@store.com", "subject": "Скидки", "body": "Только сегодня!"}
+    for extra, reason in (
+        ({"headers": {"list-unsubscribe": "<mailto:u@store.com>"}}, "automated"),
+        ({"headers": {"precedence": "bulk"}}, "automated"),
+        ({"received_at": "2026-10-12T12:59:00Z"}, "old"),
+    ):
+        skipped = api.post("/api/email/reply", json={**letter, **extra}).json()
+        assert (skipped["status"], skipped["reason"]) == ("skipped", reason)
+    fresh = api.post(
+        "/api/email/reply", json={**letter, "received_at": "2026-10-12T13:01:00Z"}
+    ).json()
+    assert fresh["status"] == "needs_review"
+    sdk.chat.completions.create.assert_not_called()

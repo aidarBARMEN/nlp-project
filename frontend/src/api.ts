@@ -23,8 +23,15 @@ export interface ChatMessage {
   content: string
   sources?: Source[]
   query?: string
-  meta?: { retrieval_ms?: number; total_ms?: number }
+  meta?: ChatMeta
   error?: string
+}
+
+export interface ChatMeta {
+  retrieval_ms?: number
+  total_ms?: number
+  model?: string
+  tokens_per_s?: number | null
 }
 
 export interface Health {
@@ -89,6 +96,105 @@ export interface SearchResult {
   results: Source[]
 }
 
+export interface ModelInfo {
+  id: string
+  provider: 'openai' | 'ollama' | 'groq' | 'local'
+  label: string
+  available: boolean
+  note: string | null
+}
+
+export interface ModelsInfo {
+  llms: ModelInfo[]
+  embedders: ModelInfo[]
+  default_llm: string
+}
+
+export type EvalKind = 'dataset' | 'retrieval' | 'generation'
+
+export interface EvalStatus {
+  running: boolean
+  kind?: EvalKind
+  stage?: string
+  done?: number
+  total?: number
+  started_at?: string
+  finished_at?: string
+  error?: string | null
+}
+
+export interface RetrievalMethod {
+  method: string
+  family: 'lexical' | 'dense' | 'hybrid'
+  model: string
+  provider?: string
+  dimensions: number | null
+  max_seq_length?: number | null
+  query_ms_mean?: number
+  query_ms_p95?: number
+  index_s?: number
+  [metric: string]: number | string | null | undefined
+}
+
+export interface GenerationSummary {
+  model: string
+  label: string
+  provider: string
+  n: number
+  errors: number
+  faithfulness: number | null
+  relevance: number | null
+  correctness: number | null
+  refusal_accuracy: number | null
+  false_refusal_rate: number | null
+  citation_rate: number | null
+  language_ok: number | null
+  latency_s: number | null
+  ttft_s: number | null
+  tokens_per_s: number | null
+}
+
+export interface GenerationAnswer {
+  id: string
+  model: string
+  question: string
+  reference: string
+  answer?: string
+  answerable?: boolean
+  refused?: boolean
+  faithfulness?: number
+  relevance?: number
+  correctness?: number
+  judge_comment?: string
+  latency_s?: number
+  error?: string
+}
+
+export interface EvalResults {
+  dataset: {
+    created_at: string
+    total: number
+    answerable: number
+    unanswerable: number
+    sample: { id: string; question: string; answer: string; title: string | null }[]
+  } | null
+  retrieval: {
+    created_at: string
+    questions: number
+    corpus_chunks: number
+    metrics: string[]
+    methods: RetrievalMethod[]
+  } | null
+  generation: {
+    created_at: string
+    judge: string
+    questions: number
+    answerable: number
+    models: GenerationSummary[]
+    answers: GenerationAnswer[]
+  } | null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, init)
   if (!res.ok) {
@@ -127,14 +233,19 @@ export const api = {
   },
   fileUrl: (docId: string, page?: number | null) => `/api/documents/${docId}/file${page ? `#page=${page}` : ''}`,
   tokenize: (text: string, model?: string) => request<TokenizeResult>('/nlp/tokenize', json({ text, model })),
-  embed: (texts: string[]) => request<EmbedResult>('/nlp/embed', json({ texts })),
+  embed: (texts: string[], model?: string) => request<EmbedResult>('/nlp/embed', json({ texts, model })),
+  models: () => request<ModelsInfo>('/models'),
+  evalStatus: () => request<EvalStatus>('/eval/status'),
+  evalRun: (kind: EvalKind, models: string[] = [], limit?: number) =>
+    request<EvalStatus>('/eval/run', json({ kind, models, limit })),
+  evalResults: () => request<EvalResults>('/eval/results'),
   search: (query: string, top_k = 10, rerank = false) => request<SearchResult>('/search', json({ query, top_k, rerank })),
 }
 
 export interface StreamHandlers {
   onSources: (data: { query: string; sources: Source[] }) => void
   onToken: (token: string) => void
-  onDone: (meta: { retrieval_ms?: number; total_ms?: number }) => void
+  onDone: (meta: ChatMeta) => void
   onError: (detail: string) => void
 }
 
@@ -144,10 +255,11 @@ export async function streamChat(
   history: { role: string; content: string }[],
   h: StreamHandlers,
   signal?: AbortSignal,
+  model?: string,
 ) {
   let res: Response
   try {
-    res = await fetch('/api/chat/stream', { ...json({ question, history }), signal })
+    res = await fetch('/api/chat/stream', { ...json({ question, history, model }), signal })
   } catch (e) {
     if ((e as Error).name !== 'AbortError') h.onError('Сервер недоступен. Запущен ли backend на :8000?')
     return

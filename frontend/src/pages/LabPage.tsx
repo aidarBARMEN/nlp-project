@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Binary, Loader2, Plus, Search, Sigma, Split, X } from 'lucide-react'
 import clsx from 'clsx'
-import { api, type EmbedResult, type SearchResult, type TokenizeResult } from '../api'
+import { api, type EmbedResult, type ModelInfo, type SearchResult, type TokenizeResult } from '../api'
 import { pagesLabel } from '../components/SourceCard'
 
 type Tab = 'tokens' | 'embeddings' | 'search'
@@ -170,12 +170,29 @@ function EmbeddingLab() {
   const [res, setRes] = useState<EmbedResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [embedders, setEmbedders] = useState<ModelInfo[]>([])
+  const [model, setModel] = useState('')
+
+  useEffect(() => {
+    api
+      .models()
+      .then((m) => {
+        setEmbedders(m.embedders)
+        setModel(m.embedders.find((e) => e.available)?.id ?? '')
+      })
+      .catch(() => undefined)
+  }, [])
+
+  const offDiag = (() => {
+    const vals = res?.similarity.flatMap((row, i) => row.filter((_, j) => j !== i)) ?? []
+    return vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : { min: 0, max: 1 }
+  })()
 
   const run = () => {
     setLoading(true)
     setError(null)
     api
-      .embed(texts.filter((t) => t.trim()))
+      .embed(texts.filter((t) => t.trim()), model || undefined)
       .then(setRes)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -203,7 +220,22 @@ function EmbeddingLab() {
             </div>
           ))}
         </div>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
+          {embedders.length > 0 && (
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              title="Модель эмбеддингов"
+            >
+              {embedders.map((m) => (
+                <option key={m.id} value={m.id} disabled={!m.available}>
+                  {m.label} · {m.provider === 'openai' ? 'OpenAI' : 'локально'}
+                  {m.note ? ` (${m.note})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           {texts.length < 8 && (
             <button
               onClick={() => setTexts([...texts, ''])}
@@ -225,9 +257,13 @@ function EmbeddingLab() {
 
       {res && (
         <Card>
-          <div className="mb-4 text-sm font-semibold text-slate-700">
+          <div className="mb-1 text-sm font-semibold text-slate-700">
             Косинусное сходство <span className="font-normal text-slate-400">· {res.model} · {res.dimensions} измерений</span>
           </div>
+          <p className="mb-4 text-xs text-slate-500">
+            Цвет — относительно диапазона этой модели: {offDiag.min.toFixed(2)} (светлый) … {offDiag.max.toFixed(2)} (тёмный).
+            Сравнивайте модели по разнице между похожими и непохожими парами, а не по абсолютным числам.
+          </p>
           <div className="overflow-x-auto">
             <table className="mx-auto border-separate border-spacing-1">
               <thead>
@@ -245,8 +281,9 @@ function EmbeddingLab() {
                   <tr key={i}>
                     <td className="pr-2 text-xs font-semibold text-slate-500">{String.fromCharCode(65 + i)}</td>
                     {row.map((v, j) => {
-                      // для text-embedding-3 типичный диапазон сходства ~0.1–1.0
-                      const t = Math.max(0, Math.min(1, (v - 0.1) / 0.9))
+                      // шкала относительно min/max вне диагонали: у разных моделей разный
+                      // «базовый уровень» сходства (у E5 даже несвязанные тексты ~0.7)
+                      const t = j === i ? 1 : Math.max(0, Math.min(1, (v - offDiag.min) / (offDiag.max - offDiag.min || 1)))
                       return (
                         <td
                           key={j}
