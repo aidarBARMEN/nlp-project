@@ -52,6 +52,8 @@ HOLDING_REPLY = {
     "en": "Thank you for your message. Your question has been forwarded to a dean's office "
     "specialist, and you will receive a reply shortly.",
 }
+SIGNATURE = {"kk": "Құрметпен,\nҚБТУ деканаты", "en": "Best regards,\nKBTU Dean's Office"}
+LANGUAGE_NAME = {"ru": "русский", "kk": "казахский (қазақ тілі)", "en": "английский (English)"}
 SOURCES_TITLE = {"ru": "Источники", "kk": "Дереккөздер", "en": "Sources"}
 
 
@@ -121,7 +123,9 @@ def compose(lang: str, name: str, content: str, sources: list[dict]) -> str:
     titles = list(dict.fromkeys(s["title"] for s in sources if s.get("title")))
     if titles:
         parts.append(f"{SOURCES_TITLE[lang]}:\n" + "\n".join(f"- {t}" for t in titles))
-    parts.append(get_settings().email_signature.replace("\\n", "\n"))
+    # EMAIL_SIGNATURE задаёт русскую подпись; для писем на других языках — подпись на языке письма
+    signature = get_settings().email_signature if lang == "ru" else SIGNATURE[lang]
+    parts.append(signature.replace("\\n", "\n"))
     return "\n\n".join(parts)
 
 
@@ -161,7 +165,9 @@ def draft_reply(
             {
                 "role": "user",
                 "content": f"Контекст из документов КБТУ:\n\n{format_context(chunks)}\n\n=====\n\n"
-                f"Тема письма: {subject}\n\nПисьмо студента:\n{body}",
+                f"Тема письма: {subject}\n\nПисьмо студента:\n{body}\n\n=====\n\n"
+                # промпт и контекст на русском тянут модель в русский — язык ответа задаём явно
+                f"Язык ответа: {LANGUAGE_NAME[lang]}. Весь текст ответа пиши только на этом языке.",
             },
         ]
         content = "".join(stream_chat(model, messages, temperature=0.1)).strip()
