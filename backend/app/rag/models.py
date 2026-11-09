@@ -188,18 +188,29 @@ def _stream_ollama(
         ) from e
 
 
+_ollama_cache: dict = {"at": 0.0, "models": None}
+
+
 def ollama_installed() -> set[str] | None:
-    """Имена скачанных моделей Ollama или None, если сервер недоступен."""
+    """Имена скачанных моделей Ollama или None, если сервер недоступен (кэш 30 с).
+
+    Без кэша каждый GET /api/models ждал таймаут соединения с выключенным Ollama
+    (на Windows до 4.5 с: повторные SYN и попытка IPv6 для «localhost»).
+    """
+    if time.time() - _ollama_cache["at"] < 30:
+        return _ollama_cache["models"]
+    names: set[str] | None = None
     try:
-        r = httpx.get(f"{get_settings().ollama_url}/api/tags", timeout=2)
+        r = httpx.get(f"{get_settings().ollama_url}/api/tags", timeout=httpx.Timeout(2, connect=0.5))
         r.raise_for_status()
+        names = set()
+        for m in r.json().get("models", []):
+            names.add(m["name"])
+            if m["name"].endswith(":latest"):
+                names.add(m["name"].removesuffix(":latest"))
     except httpx.HTTPError:
-        return None
-    names = set()
-    for m in r.json().get("models", []):
-        names.add(m["name"])
-        if m["name"].endswith(":latest"):
-            names.add(m["name"].removesuffix(":latest"))
+        names = None
+    _ollama_cache.update(at=time.time(), models=names)
     return names
 
 

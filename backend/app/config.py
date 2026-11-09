@@ -26,7 +26,8 @@ class Settings(IngestionSettings):
 
     # Альтернативные (не OpenAI) модели: локальные LLM через Ollama и эмбеддинги
     # sentence-transformers. Используются в чате (выбор модели) и в оценке качества.
-    ollama_url: str = "http://localhost:11434"
+    # 127.0.0.1, а не localhost: на Windows localhost сначала пробует IPv6 (+2 с на каждый запрос)
+    ollama_url: str = "http://127.0.0.1:11434"
     ollama_models: str = "qwen2.5:1.5b,gemma3:1b,llama3.2:1b"
     ollama_num_ctx: int = Field(default=8192, ge=2048, le=131072)
     local_embedding_models: str = (
