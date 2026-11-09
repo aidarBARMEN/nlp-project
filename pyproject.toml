@@ -46,6 +46,9 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Preserve the partner's prompt, stopword and parser formatting.
 "backend/**/*.py" = ["E501"]
+# QA-кейсы: длинные вопросы и эталоны на русском
+"tests/qa/*.py" = ["E501"]
+"scripts/build_qa_report.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
