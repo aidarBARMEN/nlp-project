@@ -2,6 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   BarChart3,
   BookOpen,
+  ClipboardCheck,
+  FileSignature,
+  GraduationCap,
+  Inbox,
+  Lock,
+  LogIn,
+  LogOut,
+  UserCog,
+  UserRound,
   CarFront,
   ChevronsLeft,
   ChevronsRight,
@@ -27,42 +36,74 @@ import PracticeCheckPage from './pages/PracticeCheckPage'
 import ParkingPage from './pages/ParkingPage'
 import CampusPage from './pages/CampusPage'
 import DiplomaPage from './pages/DiplomaPage'
+import ApplicationsPage from './pages/ApplicationsPage'
+import ApplicationsInboxPage from './pages/ApplicationsInboxPage'
+import AttendancePage from './pages/AttendancePage'
+import UsersPage, { ProfilePage } from './pages/UsersPage'
+import AuthDialog from './components/AuthDialog'
+import { useAuth, type Role, type User } from './auth'
 
-type Page = 'chat' | 'knowledge' | 'lab' | 'metrics' | 'docflow' | 'practice' | 'parking' | 'campus' | 'diploma' | 'diploma-registry'
-type NavItem = { id: Page; label: string; icon: typeof MessageSquare }
+type Page =
+  | 'chat' | 'applications' | 'diploma' | 'practice' | 'campus' | 'parking'
+  | 'attendance'
+  | 'inbox' | 'diploma-registry' | 'docflow' | 'knowledge'
+  | 'lab' | 'metrics' | 'users' | 'profile'
+// all — без входа; login — любой вошедший; список ролей — только эти роли
+type Access = 'all' | 'login' | Role[]
+type NavItem = { id: Page; label: string; icon: typeof MessageSquare; access: Access }
 
-// разделы сгруппированы по тем, кто ими пользуется
+const STAFF: Role[] = ['dean', 'admin']
 const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Студентам',
     items: [
-      { id: 'chat', label: 'Ассистент', icon: MessageSquare },
-      { id: 'practice', label: 'Проверка практики', icon: FileCheck2 },
-      { id: 'diploma', label: 'Мой диплом', icon: BookOpen },
-      { id: 'campus', label: 'Свободные аудитории', icon: DoorOpen },
-      { id: 'parking', label: 'Парковка', icon: CarFront },
+      { id: 'chat', label: 'Ассистент', icon: MessageSquare, access: 'all' },
+      { id: 'applications', label: 'Заявления', icon: FileSignature, access: 'login' },
+      { id: 'diploma', label: 'Мой диплом', icon: GraduationCap, access: 'login' },
+      { id: 'practice', label: 'Проверка практики', icon: FileCheck2, access: 'all' },
+      { id: 'campus', label: 'Свободные аудитории', icon: DoorOpen, access: 'all' },
+      { id: 'parking', label: 'Парковка', icon: CarFront, access: 'all' },
     ],
   },
   {
-    title: 'Университету',
+    title: 'Преподавателям',
+    items: [{ id: 'attendance', label: 'Посещаемость', icon: ClipboardCheck, access: ['teacher', 'dean', 'admin'] }],
+  },
+  {
+    title: 'Деканату',
     items: [
-      { id: 'diploma-registry', label: 'Дипломные проекты', icon: BookOpen },
-      { id: 'docflow', label: 'Документооборот', icon: FolderKanban },
-      { id: 'knowledge', label: 'База знаний', icon: BookOpen },
+      { id: 'inbox', label: 'Входящие заявления', icon: Inbox, access: STAFF },
+      { id: 'diploma-registry', label: 'Дипломные проекты', icon: BookOpen, access: STAFF },
+      { id: 'docflow', label: 'Документооборот', icon: FolderKanban, access: STAFF },
+      { id: 'knowledge', label: 'База знаний', icon: BookOpen, access: STAFF },
     ],
   },
   {
-    title: 'Исследования',
+    title: 'Администрирование',
     items: [
-      { id: 'lab', label: 'NLP-лаборатория', icon: FlaskConical },
-      { id: 'metrics', label: 'Метрики моделей', icon: BarChart3 },
+      { id: 'users', label: 'Пользователи', icon: UserCog, access: ['admin'] },
+      { id: 'lab', label: 'NLP-лаборатория', icon: FlaskConical, access: ['admin'] },
+      { id: 'metrics', label: 'Метрики моделей', icon: BarChart3, access: ['admin'] },
     ],
   },
 ]
-const NAV = SECTIONS.flatMap((s) => s.items)
+const PROFILE_ITEM: NavItem = { id: 'profile', label: 'Профиль', icon: UserRound, access: 'login' }
+
+function allowed(item: NavItem, user: User | null) {
+  if (item.access === 'all') return true
+  if (item.access === 'login') return !!user
+  return !!user && item.access.includes(user.role)
+}
+/** Пункт виден в меню: открытые и «нужен вход» — всем (второе с замком), ролевые — только своим. */
+const visible = (item: NavItem, user: User | null) =>
+  item.access === 'all' || item.access === 'login' || allowed(item, user)
+
+const NAV = [...SECTIONS.flatMap((s) => s.items), PROFILE_ITEM]
 const COLLAPSED_KEY = 'kbtu:sidebar-collapsed'
 
 export default function App() {
+  const { user, ready, logout } = useAuth()
+  const [authOpen, setAuthOpen] = useState<string | null>(null)
   // раздел из адреса (#docflow) — чтобы на раздел можно было дать прямую ссылку
   const [page, setPage] = useState<Page>(() => {
     const hash = window.location.hash.slice(1).split('/')[0]
@@ -97,6 +138,11 @@ export default function App() {
   }, [refreshHealth])
 
   const go = (p: Page) => {
+    const item = NAV.find((n) => n.id === p)!
+    if (!allowed(item, user) && item.access === 'login') {
+      setAuthOpen('Этот раздел работает с вашими данными — войдите, чтобы продолжить.')
+      return
+    }
     setPage(p)
     window.history.replaceState(null, '', `#${p}`)
     setMenuOpen(false)
@@ -140,7 +186,7 @@ export default function App() {
       </div>
 
       <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-3">
-        {SECTIONS.map((section) => (
+        {SECTIONS.filter((section) => section.items.some((i) => visible(i, user))).map((section) => (
           <div key={section.title} className="mt-4 first:mt-2">
             {compact ? (
               <div className="mx-auto mb-2 h-px w-6 bg-slate-200" />
@@ -150,8 +196,10 @@ export default function App() {
               </div>
             )}
             <div className="space-y-0.5">
-              {section.items.map(({ id, label, icon: Icon }) => {
+              {section.items.filter((i) => visible(i, user)).map((item) => {
+                const { id, label, icon: Icon } = item
                 const active = page === id
+                const locked = !allowed(item, user)
                 return (
                   <button
                     key={id}
@@ -166,6 +214,7 @@ export default function App() {
                     {active && <span className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r bg-navy-900" />}
                     <Icon size={18} strokeWidth={active ? 2.2 : 1.8} className={active ? 'text-navy-900' : 'text-slate-400'} />
                     {!compact && label}
+                    {!compact && locked && <Lock size={12} className="ml-auto text-slate-300" />}
                   </button>
                 )
               })}
@@ -180,6 +229,8 @@ export default function App() {
       </nav>
 
       <div className={clsx('border-t border-slate-100', compact ? 'py-3' : 'px-4 py-3')}>
+        <Account user={user} compact={compact} onLogin={() => setAuthOpen('')} onProfile={() => go('profile')}
+                 onLogout={() => { logout(); go('chat') }} active={page === 'profile'} />
         <SystemStatus health={health} down={backendDown} compact={compact} />
         <button
           onClick={toggleCollapsed}
@@ -214,7 +265,16 @@ export default function App() {
           <span className="ml-auto truncate text-sm font-medium text-slate-700">{current.label}</span>
         </header>
 
+        {!ready ? null : !allowed(current, user) ? (
+          <NoAccess needLogin={!user} onLogin={() => setAuthOpen('')} />
+        ) : (
+          <>
         {page === 'chat' && <ChatPage convs={convs} health={health} />}
+        {page === 'applications' && <ApplicationsPage onLogin={() => setAuthOpen('')} />}
+        {page === 'inbox' && <ApplicationsInboxPage />}
+        {page === 'attendance' && <AttendancePage />}
+        {page === 'users' && <UsersPage />}
+        {page === 'profile' && <ProfilePage />}
         {page === 'knowledge' && <KnowledgePage onChange={refreshHealth} health={health} />}
         {page === 'lab' && <LabPage />}
         {page === 'metrics' && <MetricsPage />}
@@ -224,7 +284,10 @@ export default function App() {
         {page === 'campus' && <CampusPage />}
         {page === 'diploma' && <DiplomaPage key="student" />}
         {page === 'diploma-registry' && <DiplomaPage key="university" university />}
+          </>
+        )}
       </main>
+      {authOpen !== null && <AuthDialog reason={authOpen || undefined} onClose={() => setAuthOpen(null)} />}
     </div>
   )
 }
@@ -300,6 +363,60 @@ function SystemStatus({ health, down, compact }: { health: Health | null; down: 
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function Account({ user, compact, onLogin, onProfile, onLogout, active }: {
+  user: User | null
+  compact: boolean
+  onLogin: () => void
+  onProfile: () => void
+  onLogout: () => void
+  active: boolean
+}) {
+  if (!user) {
+    return (
+      <button onClick={onLogin} title={compact ? 'Войти' : undefined}
+              className={clsx('mb-2 flex w-full items-center gap-2 rounded-lg bg-navy-900 py-2 text-sm font-medium text-white hover:bg-navy-800',
+                compact ? 'justify-center' : 'px-3')}>
+        <LogIn size={16} /> {!compact && 'Войти'}
+      </button>
+    )
+  }
+  const initials = (user.full_name || user.email).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')
+  return (
+    <div className={clsx('mb-2 flex items-center gap-2 rounded-lg', active && 'bg-navy-50', compact ? 'flex-col py-1' : 'px-1 py-1')}>
+      <button onClick={onProfile} title="Профиль" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-900 text-xs font-semibold text-white">{initials}</span>
+        {!compact && (
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-slate-800">{user.full_name || user.email}</span>
+            <span className="block truncate text-[11px] text-slate-500">{user.role_name}</span>
+          </span>
+        )}
+      </button>
+      <button onClick={onLogout} title="Выйти" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+        <LogOut size={15} />
+      </button>
+    </div>
+  )
+}
+
+function NoAccess({ needLogin, onLogin }: { needLogin: boolean; onLogin: () => void }) {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6">
+      <div className="max-w-sm text-center">
+        <Lock size={28} className="mx-auto text-slate-300" />
+        <p className="mt-3 text-sm text-slate-600">
+          {needLogin
+            ? 'Войдите, чтобы открыть этот раздел.'
+            : 'Этот раздел доступен другой роли. Если он нужен вам по работе, попросите администратора назначить роль.'}
+        </p>
+        {needLogin && (
+          <button onClick={onLogin} className="mt-4 rounded-xl bg-navy-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-navy-800">Войти</button>
+        )}
+      </div>
     </div>
   )
 }

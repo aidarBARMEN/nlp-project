@@ -39,6 +39,10 @@ class Settings(IngestionSettings):
     groq_models: str = "qwen/qwen3.8-27b"
     # токен для датчиков и камер парковки (POST /api/parking/events); пусто — приём выключен
     parking_api_token: str = ""
+    # учётные записи: адреса, которые при регистрации становятся администраторами,
+    # и разрешённые домены почты (пусто — любые)
+    admin_emails: str = ""
+    auth_email_domains: str = ""
     # спутниковая подложка Google (Map Tiles API); пусто — используется Esri World Imagery
     google_maps_api_key: str = ""
     # LLM-судья для метрик генерации (faithfulness, relevance, correctness)

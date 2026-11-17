@@ -1,5 +1,6 @@
 // API модуля документооборота (/api/edo). Роль передаётся заголовком X-EDO-Role.
 import type { DocumentCheck } from './practice'
+import { withToken } from './auth'
 
 export type Access = 'full' | 'meta' | null
 export type DocStatus = 'on_approval' | 'approved' | 'rejected' | 'archived'
@@ -170,7 +171,7 @@ export const edo = {
     }),
   archive: (role: string, id: number) => call<DocDetail>(role, `/documents/${id}/archive`, { method: 'POST' }),
   register: (role: string, form: FormData) => call<DocDetail>(role, '/documents', { method: 'POST', body: form }),
-  fileUrl: (role: string, id: number) => `/api/edo/documents/${id}/file?role=${encodeURIComponent(role)}`,
+  fileUrl: (role: string, id: number) => withToken(`/api/edo/documents/${id}/file?role=${encodeURIComponent(role)}`),
   persons: (role: string, f: { kind?: string; q?: string } = {}) => call<Person[]>(role, `/persons${qs(f)}`),
   personalFile: (role: string, id: number) => call<PersonalFile>(role, `/persons/${id}`),
 }

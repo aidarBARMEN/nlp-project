@@ -1,7 +1,9 @@
 """Документооборот: ролевой доступ, маршруты согласования, регистрация, журнал."""
 
+from typing import Annotated
+
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app.edo import router as edo_router
@@ -14,6 +16,16 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(edo_router, "get_store", lambda: store)
     app = FastAPI()
     app.include_router(edo_router.router)
+
+    # проверку аккаунта подменяем: здесь тестируются права подразделений внутри ЭДО
+    def role_from_header(x_edo_role: Annotated[str, Header()]):
+        if x_edo_role not in edo_router.ROLES:
+            raise HTTPException(400, "Неизвестная роль")
+        return x_edo_role
+
+    app.dependency_overrides[edo_router.edo_role] = role_from_header
+    app.dependency_overrides[edo_router.current_user] = lambda: {"id": 1, "role": "admin"}
+    monkeypatch.setattr(edo_router, "user_from_token", lambda token: {"id": 1, "role": "admin"})
     return TestClient(app)
 
 

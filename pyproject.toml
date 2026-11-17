@@ -20,7 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-beautifulsoup4", "httpx>=0.28,<1"]
 app = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "python-multipart>=0.0.20,<1",
-       "rank-bm25>=0.2.2,<1", "snowballstemmer>=2.2,<4", "numpy>=1.26,<3"]
+       "rank-bm25>=0.2.2,<1", "opencv-python-headless>=4.9,<5", "qrcode[pil]>=7.4,<9", "reportlab>=4,<5", "snowballstemmer>=2.2,<4", "numpy>=1.26,<3"]
 
 [project.scripts]
 kbtu-ingest = "ingestion.cli:main"

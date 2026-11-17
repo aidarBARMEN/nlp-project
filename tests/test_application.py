@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import main
+from backend.app import auth, main
 from backend.app.config import Settings
 from backend.app.rag import (
     email_reply,
@@ -55,8 +55,15 @@ def application(tmp_path, monkeypatch):
     monkeypatch.setattr(embedder, "OpenAI", Mock(return_value=client))
     vector_store.close_vector_store()
     llm.close_client()
-    with TestClient(main.app) as api:
-        yield api, config, client
+    # эти тесты проверяют RAG-пайплайн, а не права доступа: действуем как администратор
+    admin = {"id": 1, "role": "admin", "email": "admin@test"}
+    main.app.dependency_overrides[auth.require_dean] = lambda: admin
+    main.app.dependency_overrides[auth.require_admin] = lambda: admin
+    try:
+        with TestClient(main.app) as api:
+            yield api, config, client
+    finally:
+        main.app.dependency_overrides.clear()
 
 
 def upload(api, data, name="policy.pdf"):

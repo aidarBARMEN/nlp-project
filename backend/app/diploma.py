@@ -16,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .auth import user_from_token
 from .config import get_settings
 
 router = APIRouter(prefix="/api/diploma", tags=["Дипломные работы"])
@@ -112,9 +113,15 @@ def owner(db, authorization):
         "SELECT student_id FROM sessions WHERE token=? AND expires>?",
         (hashlib.sha256(token.encode()).hexdigest(), time.time()),
     ).fetchone()
-    if not row:
-        raise HTTPException(401, "Войдите в аккаунт студента")
-    return row["student_id"]
+    if row:
+        return row["student_id"]
+    # общий аккаунт сайта (email и пароль): Student ID берётся из профиля
+    user = user_from_token(token)
+    if user:
+        if not user["student_id"]:
+            raise HTTPException(422, "Укажите Student ID в профиле, чтобы подать данные о дипломе")
+        return user["student_id"]
+    raise HTTPException(401, "Войдите в аккаунт студента")
 
 
 @router.post("/logout")
@@ -208,10 +215,14 @@ def save(body: Submission, authorization: str = Header(default="")):
         return {**data, "student_id": student, "version": version + 1, "updated_at": stamp}
 
 
-def require_dean(key):
+def require_dean(key, authorization=""):
+    # деканат и администраторы с общим аккаунтом работают без отдельного ключа
+    user = user_from_token((authorization or "").removeprefix("Bearer ").strip())
+    if user and user["role"] in ("dean", "admin"):
+        return
     path = get_settings().data_dir / "diploma-dean-key.txt"
-    if not path.exists() or not hmac.compare_digest(key, path.read_text().strip()):
-        raise HTTPException(403, "Нужен ключ доступа деканата")
+    if not key or not path.exists() or not hmac.compare_digest(key, path.read_text().strip()):
+        raise HTTPException(403, "Нужен доступ деканата")
 
 
 def all_records(faculty="", program=""):
@@ -271,14 +282,24 @@ def project_groups(items):
 
 
 @router.get("/records")
-def records(x_dean_key: str = Header(default=""), faculty: str = "", program: str = ""):
-    require_dean(x_dean_key)
+def records(
+    x_dean_key: str = Header(default=""),
+    authorization: str = Header(default=""),
+    faculty: str = "",
+    program: str = "",
+):
+    require_dean(x_dean_key, authorization)
     return all_records(faculty, program)
 
 
 @router.get("/export")
-def export(x_dean_key: str = Header(default=""), faculty: str = "", program: str = ""):
-    require_dean(x_dean_key)
+def export(
+    x_dean_key: str = Header(default=""),
+    authorization: str = Header(default=""),
+    faculty: str = "",
+    program: str = "",
+):
+    require_dean(x_dean_key, authorization)
     wb = Workbook()
     ws = wb.active
     ws.title = "Дипломные работы"
@@ -295,8 +316,10 @@ def export(x_dean_key: str = Header(default=""), faculty: str = "", program: str
             "Специальность",
         ]
     )
-    edge = Side(style="medium", color="334155")
-    inner = Side(style="thin", color="CBD5E1")
+    # строгое оформление для печати: только белый фон, чёрный текст и рамки
+    edge = Side(style="medium", color="000000")
+    inner = Side(style="thin", color="000000")
+    white = PatternFill(fill_type=None)
     for number, project in enumerate(project_groups(all_records(faculty, program)), start=1):
         start = ws.max_row + 1
         people = list(project["members"].values())
@@ -317,7 +340,8 @@ def export(x_dean_key: str = Header(default=""), faculty: str = "", program: str
             for col, cell in enumerate(ws[ws.max_row], start=1):
                 cell.data_type = "s"  # Never interpret student text as a formula.
                 cell.alignment = Alignment(wrap_text=True, vertical="center")
-                cell.fill = PatternFill("solid", fgColor="EFF6FF" if number % 2 else "FFFFFF")
+                cell.fill = white
+                cell.font = Font(name="Times New Roman", size=11, color="000000")
                 cell.border = Border(
                     left=edge if col == 1 else inner,
                     right=edge if col == 9 else inner,
@@ -339,8 +363,10 @@ def export(x_dean_key: str = Header(default=""), faculty: str = "", program: str
                 )
                 ws.merge_cells(start_row=start, end_row=end, start_column=col, end_column=col)
     for cell in ws[1]:
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.fill = PatternFill("solid", fgColor="172554")
+        cell.font = Font(name="Times New Roman", size=11, bold=True, color="000000")
+        cell.fill = white
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(left=inner, right=inner, top=edge, bottom=edge)
     for col, width in zip("ABCDEFGHI", [12, 60, 32, 20, 36, 18, 30, 28, 38], strict=True):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"

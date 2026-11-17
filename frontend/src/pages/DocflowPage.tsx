@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FilePlus2, Info, Loader2, UserRound } from 'lucide-react'
 import clsx from 'clsx'
 import { edo, type Meta } from '../edo'
+import { useAuth } from '../auth'
 import Architecture from './docflow/Architecture'
 import DocumentDrawer from './docflow/DocumentDrawer'
 import Overview from './docflow/Overview'
@@ -12,14 +13,21 @@ import Registry from './docflow/Registry'
 type Tab = 'overview' | 'registry' | 'files' | 'approvals' | 'architecture'
 
 const ROLE_KEY = 'kbtu-edo:role'
+// подразделения, в которых может работать учётная запись (сервер проверяет то же самое)
+const EDO_ROLES: Record<string, string[] | 'all'> = { admin: 'all', dean: ['dean', 'registrar', 'practice'] }
 
 export default function DocflowPage() {
+  const { user } = useAuth()
+  const permitted = EDO_ROLES[user?.role ?? ''] ?? []
+  const can = (r: string) => permitted === 'all' || permitted.includes(r)
   const [role, setRole] = useState(() => {
+    let saved = ''
     try {
-      return localStorage.getItem(ROLE_KEY) || 'rector'
+      saved = localStorage.getItem(ROLE_KEY) || ''
     } catch {
-      return 'rector'
+      /* storage недоступен */
     }
+    return can(saved) ? saved : user?.role === 'dean' ? 'dean' : 'rector'
   })
   const [meta, setMeta] = useState<Meta | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +94,7 @@ export default function DocflowPage() {
                 <span className="block text-[10px] text-slate-500 uppercase">Вы работаете как</span>
                 <select value={role} onChange={(e) => setRole(e.target.value)}
                         className="cursor-pointer bg-transparent text-sm font-semibold text-slate-800 outline-none">
-                  {(meta?.roles ?? [{ code: role, name: '…', unit: '' }]).map((r) => (
+                  {(meta?.roles ?? [{ code: role, name: '…', unit: '' }]).filter((r) => can(r.code)).map((r) => (
                     <option key={r.code} value={r.code}>{r.name}</option>
                   ))}
                 </select>
@@ -106,8 +114,8 @@ export default function DocflowPage() {
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>
-            Демонстрационный режим: все студенты, сотрудники и документы вымышлены. Роль выбирается вручную;
-            при внедрении она определяется учётной записью КБТУ.
+            Демонстрационный режим: студенты, сотрудники и документы вымышлены. Доступные подразделения
+            определяются вашей учётной записью{user?.role === 'admin' ? ' (администратор видит все)' : ''}.
             {current && <> Подразделение: <b>{current.unit}</b>.</>}
           </span>
         </div>

@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,10 @@ from openai import OpenAIError
 from ingestion.config import PROJECT_DIR
 from ingestion.parsers import SUPPORTED_EXTENSIONS
 
+from .applications.router import router as applications_router
+from .attendance.router import router as attendance_router
+from .auth import require_admin, require_dean
+from .auth import router as auth_router
 from .campus.router import router as campus_router
 from .config import get_settings
 from .diploma import router as diploma_router
@@ -75,6 +79,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="KBTU Smart Assistant API", version="1.0.0", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(applications_router)
+app.include_router(attendance_router)
 app.include_router(edo_router)
 app.include_router(diploma_router)
 app.include_router(practice_router)
@@ -132,7 +139,7 @@ def list_documents():
     return registry_documents()
 
 
-@app.post("/api/documents/upload")
+@app.post("/api/documents/upload", dependencies=[Depends(require_dean)])
 def upload_documents(files: Annotated[list[UploadFile], File()]):
     root = settings.documents_path
     results, errors = [], []
@@ -158,13 +165,13 @@ def upload_documents(files: Annotated[list[UploadFile], File()]):
     return {"indexed": results, "errors": errors}
 
 
-@app.post("/api/documents/sync")
+@app.post("/api/documents/sync", dependencies=[Depends(require_dean)])
 def sync_documents(reset: bool = False):
     """Импорт inbox и индексация подготовленных документов без удаления исходников."""
     return sync_directory(reset=reset)
 
 
-@app.delete("/api/documents/{doc_id}")
+@app.delete("/api/documents/{doc_id}", dependencies=[Depends(require_dean)])
 def delete_document(doc_id: str):
     name = remove_document(doc_id)
     if not name:
@@ -186,7 +193,7 @@ def get_document_file(doc_id: str):
     )
 
 
-@app.post("/api/documents/{doc_id}/trust")
+@app.post("/api/documents/{doc_id}/trust", dependencies=[Depends(require_dean)])
 def document_trust(doc_id: str, request: TrustRequest):
     try:
         return set_document_trust(doc_id, request.trust_level, request.reason)
@@ -413,7 +420,7 @@ def eval_status():
     return evaluation.status()
 
 
-@app.post("/api/eval/run")
+@app.post("/api/eval/run", dependencies=[Depends(require_admin)])
 def eval_run(req: EvalRunRequest):
     return evaluation.start(req.kind, req.models, req.limit)
 

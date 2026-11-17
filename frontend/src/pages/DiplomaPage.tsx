@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Download, GraduationCap, Plus, Trash2 } from 'lucide-react'
+import { getToken, useAuth } from '../auth'
 
 type Member = { student_id: string; full_name: string }
 type Entry = { faculty: string; program: string; full_name: string; study_group: string; topic: string; supervisor: string; members: Member[]; version: number; updated_at?: string; student_id?: string }
@@ -8,7 +9,10 @@ const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 te
 const primary = 'rounded-xl bg-navy-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50'
 
 export default function DiplomaPage({ university = false }: { university?: boolean }) {
-  const [token, setToken] = useState(() => sessionStorage.getItem('diploma-token') || '')
+  // вошедший на сайт пользователь работает со своей записью без отдельного входа по Student ID
+  const [token, setToken] = useState(() => sessionStorage.getItem('diploma-token') || getToken())
+  const { user } = useAuth()
+  const staff = !!user && (user.role === 'dean' || user.role === 'admin')
   const [student, setStudent] = useState('')
   const [password, setPassword] = useState('')
   const [register, setRegister] = useState(false)
@@ -39,6 +43,11 @@ export default function DiplomaPage({ university = false }: { university?: boole
     }
     return response
   }
+  useEffect(() => {
+    if (!university || !staff) return
+    request('records').then(r => r.json()).then(setRows).catch(e => setError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [university, staff])
   async function action(fn: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('')
     try { await fn() } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось выполнить запрос') } finally { setBusy(false) }
@@ -61,7 +70,7 @@ export default function DiplomaPage({ university = false }: { university?: boole
     {notice && <div role="status" className="mb-5 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</div>}
     {dean ? <section className="rounded-2xl border border-slate-200 bg-white p-6">
       <h2 className="text-xl font-semibold">Реестр дипломных работ</h2><p className="mt-2 mb-5 text-sm text-slate-500">Скачайте один Excel со всеми проектами: каждый участник — отдельная строка, каждая команда — общий блок с рамкой. Новые команды добавляются снизу. Совпадающие состав, тема и руководитель объединяются; отличающиеся сведения сохраняются отдельно.</p>
-      <form className="flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); void action(async () => { setRows(null); setRows(await (await request('records')).json()) }) }}><input aria-label="Ключ доступа деканата" type="password" className={`${input} max-w-sm`} placeholder="Ключ доступа деканата" required value={key} onChange={e => { setKey(e.target.value); setRows(null) }} /><button disabled={busy} className={primary}>Открыть / обновить</button></form>
+      <form className="flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); void action(async () => { setRows(null); setRows(await (await request('records')).json()) }) }}>{!staff && <input aria-label="Ключ доступа деканата" type="password" className={`${input} max-w-sm`} placeholder="Ключ доступа деканата" required value={key} onChange={e => { setKey(e.target.value); setRows(null) }} />}<button disabled={busy} className={primary}>Открыть / обновить</button></form>
       {rows && <><div className="mt-6 grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-medium">Факультет<select aria-label="Фильтр факультета" className={`${input} mt-2`} value={facultyFilter} onChange={e => { setFacultyFilter(e.target.value); setProgramFilter('') }}><option value="">Все факультеты</option>{Object.keys(faculties).map(f => <option key={f}>{f}</option>)}<option value="__missing__">Не указан (старые записи)</option></select></label>
         <label className="text-sm font-medium">Специальность<select aria-label="Фильтр специальности" className={`${input} mt-2`} disabled={!faculties[facultyFilter]} value={programFilter} onChange={e => setProgramFilter(e.target.value)}><option value="">Все специальности</option>{(faculties[facultyFilter] || []).map(p => <option key={p}>{p}</option>)}</select></label>
