@@ -24,6 +24,7 @@ from ingestion.parsers import SUPPORTED_EXTENSIONS
 
 from .campus.router import router as campus_router
 from .config import get_settings
+from .diploma import router as diploma_router
 from .edo.router import router as edo_router
 from .parking.router import router as parking_router
 from .practice.router import router as practice_router
@@ -75,6 +76,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="KBTU Smart Assistant API", version="1.0.0", lifespan=lifespan)
 app.include_router(edo_router)
+app.include_router(diploma_router)
 app.include_router(practice_router)
 app.include_router(parking_router)
 app.include_router(campus_router)

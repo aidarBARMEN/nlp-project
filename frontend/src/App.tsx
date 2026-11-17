@@ -26,8 +26,9 @@ import DocflowPage from './pages/DocflowPage'
 import PracticeCheckPage from './pages/PracticeCheckPage'
 import ParkingPage from './pages/ParkingPage'
 import CampusPage from './pages/CampusPage'
+import DiplomaPage from './pages/DiplomaPage'
 
-type Page = 'chat' | 'knowledge' | 'lab' | 'metrics' | 'docflow' | 'practice' | 'parking' | 'campus'
+type Page = 'chat' | 'knowledge' | 'lab' | 'metrics' | 'docflow' | 'practice' | 'parking' | 'campus' | 'diploma' | 'diploma-registry'
 type NavItem = { id: Page; label: string; icon: typeof MessageSquare }
 
 // разделы сгруппированы по тем, кто ими пользуется
@@ -37,6 +38,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { id: 'chat', label: 'Ассистент', icon: MessageSquare },
       { id: 'practice', label: 'Проверка практики', icon: FileCheck2 },
+      { id: 'diploma', label: 'Мой диплом', icon: BookOpen },
       { id: 'campus', label: 'Свободные аудитории', icon: DoorOpen },
       { id: 'parking', label: 'Парковка', icon: CarFront },
     ],
@@ -44,6 +46,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Университету',
     items: [
+      { id: 'diploma-registry', label: 'Дипломные проекты', icon: BookOpen },
       { id: 'docflow', label: 'Документооборот', icon: FolderKanban },
       { id: 'knowledge', label: 'База знаний', icon: BookOpen },
     ],
@@ -219,6 +222,8 @@ export default function App() {
         {page === 'practice' && <PracticeCheckPage />}
         {page === 'parking' && <ParkingPage />}
         {page === 'campus' && <CampusPage />}
+        {page === 'diploma' && <DiplomaPage key="student" />}
+        {page === 'diploma-registry' && <DiplomaPage key="university" university />}
       </main>
     </div>
   )
