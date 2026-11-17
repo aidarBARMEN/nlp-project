@@ -7,7 +7,7 @@ import {
   GraduationCap,
   Library,
   Search,
-  Sparkles,
+  ShieldCheck,
   Square,
   Wallet,
   AlertTriangle,
@@ -171,10 +171,10 @@ function EmptyState({ onPick, health }: { onPick: (q: string) => void; health: H
     <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-center px-4 py-10">
       <div className="animate-fade-in text-center">
         <div className="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/80 px-3 py-1 text-xs font-medium text-brand-700 shadow-sm">
-          <Sparkles size={13} /> Retrieval-Augmented Generation
+          <ShieldCheck size={13} /> Ответы по официальным документам КБТУ
         </div>
         <h1 className="font-display text-3xl font-bold tracking-tight text-navy-900 sm:text-4xl">
-          Привет! Я ассистент <span className="bg-gradient-to-r from-brand-600 to-sky-500 bg-clip-text text-transparent">КБТУ</span>
+          Привет! Я ассистент <span className="bg-gradient-to-r from-navy-800 to-brand-500 bg-clip-text text-transparent">КБТУ</span>
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-slate-500">
           Отвечаю на вопросы об академической политике, Uninet, грантах и студенческой жизни — строго по официальным

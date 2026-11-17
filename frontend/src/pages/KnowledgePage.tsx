@@ -78,7 +78,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
 
   return (
     <div className="scrollbar-thin flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-4 py-8">
+      <div className="mx-auto max-w-6xl px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="font-display text-2xl font-bold text-navy-900">База знаний</h1>
@@ -198,16 +198,15 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                 <tbody className="divide-y divide-slate-100">
                   {docs.map((d) => (
                     <tr key={d.doc_id} className="hover:bg-slate-50/60">
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-slate-800">{d.title}</div>
-                        <div className="text-xs text-slate-400">
-                          {d.file_name}
-                          {d.academic_year && ` · ${d.academic_year}`}
-                          {d.target_audience && ` · ${d.target_audience}`}
+                      <td className="min-w-56 px-5 py-3 [overflow-wrap:anywhere]">
+                        {/* у части PDF нет заголовка — тогда главной строкой идёт имя файла */}
+                        <div className="font-medium text-slate-800">{d.title || d.file_name}</div>
+                        <div className="text-xs text-slate-500">
+                          {[d.title ? d.file_name : null, d.academic_year, d.target_audience].filter(Boolean).join(' · ')}
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="text-xs text-slate-600">{{ pending: 'Ожидает индексации', processing: 'Индексируется', processed: 'Проиндексирован', needs_ocr: 'Нужно распознавание', failed: 'Ошибка' }[d.status]}</div>
+                        <div className="text-xs whitespace-nowrap text-slate-600">{{ pending: 'Ожидает индексации', processing: 'Индексируется', processed: 'Проиндексирован', needs_ocr: 'Нужно распознавание', failed: 'Ошибка' }[d.status]}</div>
                         <div className={clsx('mt-1 text-xs', d.trust_level === 'official' ? 'text-emerald-700' : 'text-amber-700')}>
                           {d.trust_level === 'official' ? (d.is_current ? 'Официальный · действующий' : 'Официальный') : 'Источник не подтверждён'}
                         </div>
@@ -222,7 +221,7 @@ export default function KnowledgePage({ onChange, health }: { onChange: () => vo
                             onClick={() => d.trust_level === 'official' ? revoke(d) : verify(d)}
                             disabled={!!busy}
                             aria-busy={busy === `trust:${d.doc_id}`}
-                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs whitespace-nowrap text-brand-700 hover:bg-brand-50 disabled:opacity-50"
                           >
                             {busy === `trust:${d.doc_id}` && <Loader2 size={12} className="animate-spin" />}
                             {busy === `trust:${d.doc_id}` ? 'Сохраняю…' : d.trust_level === 'official' ? 'На проверку' : 'Подтвердить'}

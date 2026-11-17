@@ -37,6 +37,10 @@ class Settings(IngestionSettings):
     groq_api_key: str = ""
     # каталог Groq часто меняется: актуальный список — GET https://api.groq.com/openai/v1/models
     groq_models: str = "qwen/qwen3.8-27b"
+    # токен для датчиков и камер парковки (POST /api/parking/events); пусто — приём выключен
+    parking_api_token: str = ""
+    # спутниковая подложка Google (Map Tiles API); пусто — используется Esri World Imagery
+    google_maps_api_key: str = ""
     # LLM-судья для метрик генерации (faithfulness, relevance, correctness)
     eval_judge_model: str = "gpt-4o-mini"
 

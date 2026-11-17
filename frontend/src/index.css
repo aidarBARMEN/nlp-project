@@ -3,13 +3,16 @@
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-display: 'Unbounded', 'Inter', sans-serif;
+  --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  --color-navy-950: #060d24;
-  --color-navy-900: #0b1739;
-  --color-navy-800: #12224f;
-  --color-navy-700: #1b3068;
+  /* фирменный синий КБТУ — #002F6C */
+  --color-navy-950: #001a3d;
+  --color-navy-900: #002f6c;
+  --color-navy-800: #0b3f85;
+  --color-navy-700: #1f5299;
+  --color-navy-100: #dce6f3;
+  --color-navy-50: #eef3fa;
   --color-brand-50: #eef4ff;
   --color-brand-100: #dbe7ff;
   --color-brand-200: #bfd3ff;
@@ -40,9 +43,14 @@ body {
 
 .bg-mesh {
   background:
-    radial-gradient(900px 500px at 10% -10%, rgb(63 111 251 / 0.10), transparent 60%),
-    radial-gradient(700px 400px at 110% 10%, rgb(251 191 36 / 0.08), transparent 60%),
-    #f8fafc;
+    radial-gradient(1000px 520px at 0% -10%, rgb(0 47 108 / 0.06), transparent 60%),
+    #f7f9fc;
+}
+
+/* заголовки: Inter полужирный с плотным трекингом вместо тяжёлого начертания */
+.font-display {
+  font-weight: 650;
+  letter-spacing: -0.022em;
 }
 
 .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -52,4 +60,17 @@ body {
 .cursor-caret::after {
   content: '▍';
   @apply ml-0.5 text-brand-500 animate-blink;
+}
+
+/* подписи зон на спутниковой подложке */
+.leaflet-tooltip.twin-zone-label {
+  background: rgb(0 47 108 / 0.85);
+  border: 0;
+  color: #fff;
+  font-weight: 600;
+  font-size: 11px;
+  box-shadow: none;
+}
+.leaflet-tooltip.twin-zone-label::before {
+  display: none;
 }

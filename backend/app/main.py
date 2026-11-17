@@ -22,7 +22,11 @@ from openai import OpenAIError
 from ingestion.config import PROJECT_DIR
 from ingestion.parsers import SUPPORTED_EXTENSIONS
 
+from .campus.router import router as campus_router
 from .config import get_settings
+from .edo.router import router as edo_router
+from .parking.router import router as parking_router
+from .practice.router import router as practice_router
 from .rag import email_reply, evaluation, generator, mailbox
 from .rag.ingest import (
     get_document_file as document_file,
@@ -70,6 +74,10 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="KBTU Smart Assistant API", version="1.0.0", lifespan=lifespan)
+app.include_router(edo_router)
+app.include_router(practice_router)
+app.include_router(parking_router)
+app.include_router(campus_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
